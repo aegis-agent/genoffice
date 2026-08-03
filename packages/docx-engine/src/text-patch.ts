@@ -17,6 +17,16 @@ import { escapeXmlText } from './xml-utils'
  * self-reference mark + space run, which the plain-text model drops; when enabled,
  * that leading whitespace is treated as an immutable prefix.
  */
+/**
+ * Surgical plain-text replacement for a single body block's original XML
+ * (typically one top-level <w:p>, or an sdt shell wrapping paragraph content).
+ * Preserves run formatting outside the changed text range. Returns null when
+ * the edit cannot be applied surgically (caller must fail closed).
+ */
+export function patchBodyParagraphText(originalXml: string, newText: string): string | null {
+  return patchParagraphTexts(originalXml, newText)
+}
+
 export function patchParagraphTexts(
   entryXml: string,
   newText: string,
