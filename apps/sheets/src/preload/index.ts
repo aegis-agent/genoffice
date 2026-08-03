@@ -6,6 +6,7 @@ import type {
   AiStreamChunk,
   GenSparkAccountStatus,
 } from '@genoffice/ai-provider'
+import { DroppedPathPermitGate } from '@genoffice/electron-utils/dropped-path-permits'
 import type { ProjectApi } from '@genoffice/project-store'
 import type {
   AttachmentAddResult,
@@ -33,6 +34,8 @@ import type {
   WebSearchResult,
 } from '../shared/desktop-api'
 import { IPC_CHANNELS } from '../shared/ipc-channels'
+
+const droppedPathPermits = new DroppedPathPermitGate()
 
 const desktopApi: DesktopApi = {
   getLanguage: () => ipcRenderer.invoke('app:get-language'),
@@ -282,7 +285,11 @@ const desktopApi: DesktopApi = {
     ) {
       throw new Error('Invalid attachment paths.')
     }
-    const result: unknown = await ipcRenderer.invoke(IPC_CHANNELS.filesAdd, paths)
+    const consumed = droppedPathPermits.consumeAll(paths)
+    if (!consumed.ok) {
+      throw new Error('Attachment paths were not granted by a user file selection.')
+    }
+    const result: unknown = await ipcRenderer.invoke(IPC_CHANNELS.filesAdd, consumed.paths)
     return parseAttachmentAddResult(result)
   },
   async addPastedImage(data, ext) {
@@ -344,7 +351,9 @@ const desktopApi: DesktopApi = {
     return image
   },
   getPathForFile(file) {
-    return webUtils.getPathForFile(file)
+    const path = webUtils.getPathForFile(file)
+    if (path) droppedPathPermits.issue(path)
+    return path
   },
 }
 

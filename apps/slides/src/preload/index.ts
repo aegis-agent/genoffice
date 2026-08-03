@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import type { IpcRendererEvent } from 'electron'
+import { DroppedPathPermitGate } from '@genoffice/electron-utils/dropped-path-permits'
 import type { ProjectApi } from '@genoffice/project-store'
 import type {
   AddChartOp,
@@ -332,15 +333,30 @@ const api: SlidesApi = {
 contextBridge.exposeInMainWorld('slidesApi', api)
 
 // Chat attachment bridge: method names/signatures match the window.desktop attachment subset in docs, so the renderer's files-skill is copied over wholesale
+/** Preload-private one-time permits for drag/drop + File-input paths. */
+const droppedPathPermits = new DroppedPathPermitGate()
+
 const filesApi: DesktopFilesApi = {
   pickAttachments: () => ipcRenderer.invoke('slides:files-pick'),
-  addAttachmentPaths: (paths: string[]) => ipcRenderer.invoke('slides:files-add', paths),
+  addAttachmentPaths: (paths: string[]) => {
+    const consumed = droppedPathPermits.consumeAll(paths)
+    if (!consumed.ok) {
+      return Promise.reject(
+        new Error('Attachment paths were not granted by a user file selection.'),
+      )
+    }
+    return ipcRenderer.invoke('slides:files-add', consumed.paths)
+  },
   addPastedImage: (data: ArrayBuffer, ext: string) =>
     ipcRenderer.invoke('slides:files-add-pasted-image', data, ext),
   readAttachment: (path: string, offset: number, maxChars: number) =>
     ipcRenderer.invoke('slides:files-read', path, offset, maxChars),
   readAttachmentImage: (path: string) => ipcRenderer.invoke('slides:files-read-image', path),
-  getPathForFile: (file: File) => webUtils.getPathForFile(file),
+  getPathForFile: (file: File) => {
+    const path = webUtils.getPathForFile(file)
+    if (path) droppedPathPermits.issue(path)
+    return path
+  },
 }
 
 contextBridge.exposeInMainWorld('desktop', filesApi)

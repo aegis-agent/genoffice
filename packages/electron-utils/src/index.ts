@@ -6,3 +6,9 @@ export {
   isSafeRemoteUrl,
   type FetchWithSsrfGuardOptions,
 } from './safe-remote-url'
+export {
+  ReadablePathGrantRegistry,
+  type GrantCleanupSender,
+  type RealpathFn,
+} from './readable-path-grants'
+export { DroppedPathPermitGate, type ConsumeAllResult } from './dropped-path-permits'

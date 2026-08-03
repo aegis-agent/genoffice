@@ -109,16 +109,19 @@ import { initAutoUpdater } from './updater'
 // ANY unpacked run (`npm run shell`, `npm run dev`, `npx electron .`) must not
 // share the installed app's userData or single-instance lock — otherwise a dev
 // run silently quits and forwards its argv to the running installed GenOffice.
-// GENOFFICE_USER_DATA: test drivers point this at a scratch dir so an
-// automated instance can run alongside the dev instance (separate lock).
-if (!app.isPackaged)
-  app.setPath(
-    'userData',
-    process.env.GENOFFICE_USER_DATA ?? join(app.getPath('appData'), 'GenOffice Dev'),
-  )
+// GENOFFICE_USER_DATA is an explicit test-isolation override for both unpacked
+// and packaged acceptance runs. A non-empty override also suppresses migration
+// from the real legacy profile so an isolated run can never copy user data.
+const userDataOverride = process.env.GENOFFICE_USER_DATA?.trim()
+if (userDataOverride) {
+  app.setPath('userData', userDataOverride)
+} else if (!app.isPackaged) {
+  app.setPath('userData', join(app.getPath('appData'), 'GenOffice Dev'))
+}
 
-// The product rename from "AI Office" to GenOffice changed the userData path; migrate old user data once
-if (app.isPackaged) {
+// The product rename from "AI Office" to GenOffice changed the userData path; migrate old user data once.
+// Never migrate real profile data into an explicitly isolated acceptance profile.
+if (app.isPackaged && !userDataOverride) {
   const oldDir = join(app.getPath('appData'), 'AI Office')
   const newDir = app.getPath('userData')
   const newEmpty = !existsSync(newDir) || readdirSync(newDir).length === 0
@@ -968,6 +971,10 @@ function createShellWindow(): void {
   // the same save/don't-save/cancel prompt; any cancel aborts the close.
   // docs dirtiness lives renderer-side, so any live docs tab forces the async path
   // and gets queried there (clean tabs pass through without activation).
+  //
+  // app.quit() fires before-quit then closes windows. preventDefault() here cancels
+  // that quit. On macOS window-all-closed intentionally does not app.quit(), so after
+  // the async prompts succeed we must resume quit only when applicationQuitRequested.
   let closeConfirmed = false
   win.on('close', (event) => {
     if (closeConfirmed) return
@@ -984,25 +991,44 @@ function createShellWindow(): void {
       return
     event.preventDefault()
     void (async () => {
+      const abortClose = (): void => {
+        // User cancelled a prompt: drop any quit intent started by app.quit()/Cmd+Q
+        // so a later plain window close does not resume quitting.
+        applicationQuitRequested = false
+      }
       for (const tab of dirtySheets) {
         manager.activateTab(tab.id)
-        if (!(await requestSheetsClose(tab.webContents, win))) return
+        if (!(await requestSheetsClose(tab.webContents, win))) {
+          abortClose()
+          return
+        }
       }
       for (const tab of dirtyPdf) {
         manager.activateTab(tab.id)
-        if (!(await requestPdfClose(tab.webContents, win))) return
+        if (!(await requestPdfClose(tab.webContents, win))) {
+          abortClose()
+          return
+        }
       }
       for (const tab of dirtySlides) {
         manager.activateTab(tab.id)
-        if (!(await requestSlidesClose(tab.webContents, win))) return
+        if (!(await requestSlidesClose(tab.webContents, win))) {
+          abortClose()
+          return
+        }
       }
       for (const tab of docsTabs) {
         if (!(await docsQueryDirty(tab.webContents))) continue
         manager.activateTab(tab.id)
-        if (!(await requestDocsClose(tab.webContents, win))) return
+        if (!(await requestDocsClose(tab.webContents, win))) {
+          abortClose()
+          return
+        }
       }
       closeConfirmed = true
       if (!win.isDestroyed()) win.close()
+      // Quit was cancelled by preventDefault above; resume only for app-level quit.
+      if (applicationQuitRequested) app.quit()
     })()
   })
 
@@ -1612,6 +1638,11 @@ async function installMainProcessProxy(): Promise<void> {
 
 // ---- lifecycle (the shell is the only owner) ----
 
+// Set in before-quit (app.quit() / Cmd+Q / Playwright). Cleared if the async window
+// close guard is cancelled. Used to resume app.quit() on macOS after preventDefault
+// cancelled the original quit during dirty-tab prompts.
+let applicationQuitRequested = false
+
 let pendingLaunchPath = supportedFileIn(process.argv) ?? unsupportedFileIn(process.argv)
 
 // show() does not un-minimize, and on macOS ⌘W destroys the shell window while the
@@ -1692,6 +1723,7 @@ app.on('window-all-closed', () => {
 })
 
 app.on('before-quit', () => {
+  applicationQuitRequested = true
   // No close prompt may fall through to "Save" during shutdown
   markSheetsShuttingDown()
   stopSheetsSidecar()

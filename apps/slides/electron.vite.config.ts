@@ -38,7 +38,12 @@ export default defineConfig({
     ],
   },
   preload: {
-    plugins: [externalizeDepsPlugin()],
+    // Sandboxed preloads cannot require workspace packages at runtime.
+    plugins: [
+      externalizeDepsPlugin({
+        exclude: ['@genoffice/electron-utils', '@genoffice/electron-utils/dropped-path-permits'],
+      }),
+    ],
   },
   renderer: {
     resolve: { alias: workspaceAlias },

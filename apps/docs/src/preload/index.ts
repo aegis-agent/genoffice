@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import type { IpcRendererEvent } from 'electron'
+import { DroppedPathPermitGate } from '@genoffice/electron-utils/dropped-path-permits'
 import type {
   AiChatRequest,
   AiSettings,
@@ -9,6 +10,9 @@ import type {
   MenuCommand,
 } from '../shared/ipc'
 import type { ProjectApi } from '@genoffice/project-store'
+
+/** Preload-private one-time permits for drag/drop + File-input paths. */
+const droppedPathPermits = new DroppedPathPermitGate()
 
 const api: DesktopApi = {
   getLanguage: () => ipcRenderer.invoke('app:get-language'),
@@ -69,13 +73,25 @@ const api: DesktopApi = {
     ipcRenderer.invoke('ai:image-search', query, maxResults),
   fetchImage: (url: string) => ipcRenderer.invoke('ai:fetch-image', url),
   pickAttachments: () => ipcRenderer.invoke('files:pick'),
-  addAttachmentPaths: (paths: string[]) => ipcRenderer.invoke('files:add', paths),
+  addAttachmentPaths: (paths: string[]) => {
+    const consumed = droppedPathPermits.consumeAll(paths)
+    if (!consumed.ok) {
+      return Promise.reject(
+        new Error('Attachment paths were not granted by a user file selection.'),
+      )
+    }
+    return ipcRenderer.invoke('files:add', consumed.paths)
+  },
   addPastedImage: (data: ArrayBuffer, ext: string) =>
     ipcRenderer.invoke('files:add-pasted-image', data, ext),
   readAttachment: (path: string, offset: number, maxChars: number) =>
     ipcRenderer.invoke('files:read', path, offset, maxChars),
   readAttachmentImage: (path: string) => ipcRenderer.invoke('files:read-image', path),
-  getPathForFile: (file: File) => webUtils.getPathForFile(file),
+  getPathForFile: (file: File) => {
+    const path = webUtils.getPathForFile(file)
+    if (path) droppedPathPermits.issue(path)
+    return path
+  },
   openNewTab: (openPath?: string | null) => ipcRenderer.invoke('win:new', openPath ?? null),
   listDocsTabs: () => ipcRenderer.invoke('win:list'),
   focusDocsTab: (id: string) => ipcRenderer.invoke('win:focus', id),

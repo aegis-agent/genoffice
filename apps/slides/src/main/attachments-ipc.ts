@@ -6,9 +6,11 @@
  * channels via docs.
  */
 import { app, dialog, ipcMain } from 'electron'
+import type { IpcMainInvokeEvent } from 'electron'
 import { mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { basename, join } from 'node:path'
 import { parseFileToText } from '@genoffice/file-parse'
+import { ReadablePathGrantRegistry } from '@genoffice/electron-utils'
 import type {
   AttachmentAddResult,
   AttachmentImageResult,
@@ -18,6 +20,9 @@ import type {
 import { ATTACHMENT_IMAGE_EXTS } from '../shared/ipc'
 import { tm } from './i18n-main'
 import { dialogParent } from './session-state'
+
+/** Sender-scoped readable path grants for attachment text/image reads. */
+const attachmentPathGrants = new ReadablePathGrantRegistry()
 
 const ATTACHMENT_MAX_BYTES = 50 * 1024 * 1024
 /** Plain-text extensions, read as UTF-8 */
@@ -96,15 +101,28 @@ function statAttachment(filePath: string): { meta?: AttachmentMeta; error?: stri
   }
 }
 
-function collectAttachments(paths: string[]): AttachmentAddResult {
+function collectAttachments(event: IpcMainInvokeEvent, paths: string[]): AttachmentAddResult {
   const accepted: AttachmentMeta[] = []
   const rejected: string[] = []
+  const senderId = event.sender.id
   for (const p of paths) {
     const { meta, error } = statAttachment(p)
-    if (meta) accepted.push(meta)
-    else if (error) rejected.push(error)
+    if (meta) {
+      // Grant only paths that pass extension/size checks; fail closed if unresolvable.
+      if (!attachmentPathGrants.grant(senderId, p)) {
+        rejected.push(`${meta.name}: ${tm('errUnreadable')}`)
+        continue
+      }
+      accepted.push(meta)
+    } else if (error) rejected.push(error)
   }
+  if (accepted.length > 0) attachmentPathGrants.bindSenderCleanup(event.sender)
   return { accepted, rejected }
+}
+
+function denyUnlessGranted(event: IpcMainInvokeEvent, filePath: string): string | null {
+  if (attachmentPathGrants.isAuthorized(event.sender.id, filePath)) return null
+  return `${basename(filePath)}: ${tm('errUnreadable')}`
 }
 
 /** Save clipboard-pasted image bytes to a temp file (screenshots/bitmaps without a local path); null for non-images or empty data */
@@ -149,7 +167,7 @@ async function extractAttachmentText(filePath: string): Promise<string> {
 
 /** Register the slides:files-* attachment channels (called from registerSlidesIpc). */
 export function registerAttachmentIpc(): void {
-  ipcMain.handle('slides:files-pick', async (): Promise<AttachmentAddResult | null> => {
+  ipcMain.handle('slides:files-pick', async (event): Promise<AttachmentAddResult | null> => {
     const parent = dialogParent()
     const options = {
       title: tm('dlgAddAttachment'),
@@ -163,19 +181,21 @@ export function registerAttachmentIpc(): void {
       ? await dialog.showOpenDialog(parent, options)
       : await dialog.showOpenDialog(options)
     if (r.canceled || r.filePaths.length === 0) return null
-    return collectAttachments(r.filePaths)
+    return collectAttachments(event, r.filePaths)
   })
 
-  ipcMain.handle('slides:files-add', (_e, paths: string[]) => collectAttachments(paths))
+  ipcMain.handle('slides:files-add', (event, paths: string[]) => collectAttachments(event, paths))
 
   ipcMain.handle(
     'slides:files-read',
     async (
-      _e,
+      event,
       filePath: string,
       offset: number,
       maxChars: number,
     ): Promise<AttachmentReadResult> => {
+      const denied = denyUnlessGranted(event, filePath)
+      if (denied) return { ok: false, error: denied }
       const name = basename(filePath)
       const ext = name.split('.').pop()?.toLowerCase() ?? ''
       if (!ATTACHMENT_EXTS.has(ext)) return { ok: false, error: tm('errUnsupportedExt', { ext }) }
@@ -200,7 +220,9 @@ export function registerAttachmentIpc(): void {
   )
 
   // Image attachments read raw bytes -> base64; AiPanel puts them into the user message's images for multimodal
-  ipcMain.handle('slides:files-read-image', (_e, filePath: string): AttachmentImageResult => {
+  ipcMain.handle('slides:files-read-image', (event, filePath: string): AttachmentImageResult => {
+    const denied = denyUnlessGranted(event, filePath)
+    if (denied) return { ok: false, error: denied }
     const name = basename(filePath)
     const ext = name.split('.').pop()?.toLowerCase() ?? ''
     const mime = ATTACHMENT_IMAGE_MIME[ext]
@@ -219,10 +241,10 @@ export function registerAttachmentIpc(): void {
   // Clipboard-pasted images (screenshots and other bitmaps without a local path): saved to a temp file then take the regular attachment chain
   ipcMain.handle(
     'slides:files-add-pasted-image',
-    (_e, data: unknown, ext: unknown): AttachmentAddResult => {
+    (event, data: unknown, ext: unknown): AttachmentAddResult => {
       const filePath = savePastedImage(data, ext)
       return filePath
-        ? collectAttachments([filePath])
+        ? collectAttachments(event, [filePath])
         : { accepted: [], rejected: [tm('errNotImage')] }
     },
   )
