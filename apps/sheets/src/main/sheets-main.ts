@@ -31,7 +31,11 @@ import type {
   WebContents,
 } from 'electron'
 import { z } from 'zod'
-import { installNavigationGuard, safeExternalUrl } from '@genoffice/electron-utils'
+import {
+  installNavigationGuard,
+  ReadablePathGrantRegistry,
+  safeExternalUrl,
+} from '@genoffice/electron-utils'
 import { createI18n, getUiLang, type Lang, normalizeLang, setUiLang } from '@genoffice/i18n'
 import { ProjectStore } from '@genoffice/project-store'
 
@@ -1436,6 +1440,9 @@ const ATTACHMENT_IMAGE_MAX_BYTES = 5 * 1024 * 1024
 /** Extracted-text cache keyed by path; invalidated when mtime+size change */
 const attachmentTextCache = new Map<string, { stamp: string; text: string }>()
 
+/** Sender-scoped readable path grants for attachment text/image reads. */
+const attachmentPathGrants = new ReadablePathGrantRegistry()
+
 function statAttachment(filePath: string): { meta?: AttachmentMeta; error?: string } {
   const name = basename(filePath)
   const ext = name.split('.').pop()?.toLowerCase() ?? ''
@@ -1457,15 +1464,27 @@ function statAttachment(filePath: string): { meta?: AttachmentMeta; error?: stri
   }
 }
 
-function collectAttachments(paths: string[]): AttachmentAddResult {
+function collectAttachments(event: IpcMainInvokeEvent, paths: string[]): AttachmentAddResult {
   const accepted: AttachmentMeta[] = []
   const rejected: string[] = []
+  const senderId = event.sender.id
   for (const p of paths) {
     const { meta, error } = statAttachment(p)
-    if (meta) accepted.push(meta)
-    else if (error) rejected.push(error)
+    if (meta) {
+      if (!attachmentPathGrants.grant(senderId, p)) {
+        rejected.push(`${meta.name}: ${tm('errUnreadable')}`)
+        continue
+      }
+      accepted.push(meta)
+    } else if (error) rejected.push(error)
   }
+  if (accepted.length > 0) attachmentPathGrants.bindSenderCleanup(event.sender)
   return { accepted, rejected }
+}
+
+function denyUnlessGranted(event: IpcMainInvokeEvent, filePath: string): string | null {
+  if (attachmentPathGrants.isAuthorized(event.sender.id, filePath)) return null
+  return `${basename(filePath)}: ${tm('errUnreadable')}`
 }
 
 /** Persists clipboard-pasted image bytes to a temp file (screenshots/bitmaps
@@ -1921,12 +1940,12 @@ export function registerSheetsIpc(): void {
       properties: ['openFile', 'multiSelections'],
     })
     if (selection.canceled || selection.filePaths.length === 0) return null
-    return collectAttachments(selection.filePaths)
+    return collectAttachments(event, selection.filePaths)
   })
 
   ipcMain.handle(IPC_CHANNELS.filesAdd, (event, paths: unknown): AttachmentAddResult => {
     sessionFor(event)
-    return collectAttachments(z.array(z.string().min(1).max(1024)).max(50).parse(paths))
+    return collectAttachments(event, z.array(z.string().min(1).max(1024)).max(50).parse(paths))
   })
 
   ipcMain.handle(
@@ -1939,6 +1958,8 @@ export function registerSheetsIpc(): void {
     ): Promise<AttachmentReadResult> => {
       sessionFor(event)
       const validatedPath = z.string().min(1).max(1024).parse(filePath)
+      const denied = denyUnlessGranted(event, validatedPath)
+      if (denied) return { ok: false, error: denied }
       const name = basename(validatedPath)
       const ext = name.split('.').pop()?.toLowerCase() ?? ''
       if (!ATTACHMENT_EXTS.has(ext)) return { ok: false, error: tm('errUnsupportedExt', { ext }) }
@@ -1967,6 +1988,8 @@ export function registerSheetsIpc(): void {
   ipcMain.handle(IPC_CHANNELS.filesReadImage, (event, filePath: unknown): AttachmentImageResult => {
     sessionFor(event)
     const validatedPath = z.string().min(1).max(1024).parse(filePath)
+    const denied = denyUnlessGranted(event, validatedPath)
+    if (denied) return { ok: false, error: denied }
     const name = basename(validatedPath)
     const ext = name.split('.').pop()?.toLowerCase() ?? ''
     const mime = ATTACHMENT_IMAGE_MIME[ext]
@@ -1990,7 +2013,7 @@ export function registerSheetsIpc(): void {
       sessionFor(event)
       const filePath = savePastedImage(data, ext)
       return filePath
-        ? collectAttachments([filePath])
+        ? collectAttachments(event, [filePath])
         : { accepted: [], rejected: [tm('errNotImage')] }
     },
   )

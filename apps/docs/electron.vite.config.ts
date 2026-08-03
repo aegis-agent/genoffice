@@ -10,7 +10,14 @@ export default defineConfig({
   main: {
     plugins: [externalizeDepsPlugin({ exclude: ['@genoffice/electron-utils'] })],
   },
-  preload: {},
+  preload: {
+    // Sandboxed preloads cannot require workspace packages at runtime.
+    plugins: [
+      externalizeDepsPlugin({
+        exclude: ['@genoffice/electron-utils', '@genoffice/electron-utils/dropped-path-permits'],
+      }),
+    ],
+  },
   renderer: {
     plugins: [react()],
     server: {
