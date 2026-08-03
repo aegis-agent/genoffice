@@ -14,9 +14,13 @@ import {
   resolveMainOwnedAiConfig,
   sanitizeRendererAiSettingsUpdate,
   streamForProvider,
+  aiEmptyArgsSchema,
+  aiGskStatusArgsSchema,
+  aiSetSettingsArgsSchema,
+  aiStreamArgsSchema,
+  aiStreamCancelArgsSchema,
   type AiSettings,
   type AiStreamChunk,
-  type AiStreamRequest,
   type GenSparkAccountStatus,
   type LegacyAiSettings,
 } from '@genoffice/ai-provider'
@@ -25,6 +29,7 @@ import {
   applyAiSettingsPreferencesUpdate,
   fetchWithSsrfGuard,
   loadAiSettingsJson,
+  safeHandle,
 } from '@genoffice/electron-utils'
 import {
   webSearch,
@@ -75,15 +80,17 @@ function loadStoredAiSettings(): Partial<AiSettings> & LegacyAiSettings {
 const activeAiStreams = new Map<string, AbortController>()
 
 export function registerAiIpc(): void {
-  ipcMain.handle('ai:get-settings', (): AiSettings => {
+  safeHandle(ipcMain, 'ai:get-settings', aiEmptyArgsSchema, (): AiSettings => {
     const stored = loadStoredAiSettings()
     const settings = resolveAiSettings(stored, defaultAiSettings())
     return publicAiSettings(settings)
   })
 
   // Genspark account (gsk login state): the auth source for AI features; when logged out the frontend uses this to guide login
-  ipcMain.handle(
+  safeHandle(
+    ipcMain,
     'ai:gsk-status',
+    aiGskStatusArgsSchema,
     async (_event, withEmail?: boolean): Promise<GenSparkAccountStatus> => {
       if (!hasGskAuth()) return { loggedIn: false }
       if (!withEmail) return { loggedIn: true }
@@ -92,13 +99,14 @@ export function registerAiIpc(): void {
     },
   )
 
-  ipcMain.handle('ai:gsk-login', () => {
+  safeHandle(ipcMain, 'ai:gsk-login', aiEmptyArgsSchema, () => {
     gskLogin()
   })
 
-  ipcMain.handle('ai:set-settings', (_event, settings: unknown) => {
+  safeHandle(ipcMain, 'ai:set-settings', aiSetSettingsArgsSchema, (_event, settings) => {
     // Migrate first; only write preferences when migration is safe so we never
     // wipe unrecovered plaintext keys (skipped_insecure_storage / failed).
+    // Schema rejects apiKey/baseUrl/provider; sanitize allowlists the model.
     return applyAiSettingsPreferencesUpdate({
       settingsPath: AI_SETTINGS_PATH(),
       vaultPath: AI_SECRETS_VAULT_PATH(),
@@ -109,14 +117,15 @@ export function registerAiIpc(): void {
     })
   })
 
-  ipcMain.handle('ai:stream', async (event, request: AiStreamRequest) => {
+  safeHandle(ipcMain, 'ai:stream', aiStreamArgsSchema, async (event, request) => {
     const { requestId, system, messages } = request
     const tools = request.tools ?? []
     const maxTokens = request.maxTokens ?? 8192
     const stored = loadStoredAiSettings()
     const { provider, config } = resolveMainOwnedAiConfig(stored, gskApiKey)
     const send = (chunk: AiStreamChunk) => {
-      if (!event.sender.isDestroyed()) event.sender.send('ai:stream-chunk', chunk)
+      const inv = event as import('electron').IpcMainInvokeEvent
+      if (!inv.sender.isDestroyed()) inv.sender.send('ai:stream-chunk', chunk)
     }
     if (!config.apiKey) {
       send({
@@ -152,7 +161,7 @@ export function registerAiIpc(): void {
     }
   })
 
-  ipcMain.handle('ai:stream-cancel', (_event, requestId: string) => {
+  safeHandle(ipcMain, 'ai:stream-cancel', aiStreamCancelArgsSchema, (_event, requestId) => {
     activeAiStreams.get(requestId)?.abort()
   })
 

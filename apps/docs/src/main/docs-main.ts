@@ -24,10 +24,16 @@ import {
   AI_PROVIDER_SECRETS_VAULT_FILENAME,
   applyAiSettingsPreferencesUpdate,
   fetchWithSsrfGuard,
+  filesAddArgsSchema,
+  filesAddPastedImageArgsSchema,
+  filesPickArgsSchema,
+  filesReadArgsSchema,
+  filesReadImageArgsSchema,
   installNavigationGuard,
   loadAiSettingsJson,
   ReadablePathGrantRegistry,
   safeExternalUrl,
+  safeHandle,
 } from '@genoffice/electron-utils'
 import { createI18n, getUiLang, normalizeLang, setUiLang } from '@genoffice/i18n'
 import { ProjectStore } from '@genoffice/project-store'
@@ -40,6 +46,12 @@ import type {
 } from 'electron'
 import { parseFileToText } from '@genoffice/file-parse'
 import {
+  aiChatArgsSchema,
+  aiEmptyArgsSchema,
+  aiGskStatusArgsSchema,
+  aiSetSettingsArgsSchema,
+  aiStreamArgsSchema,
+  aiStreamCancelArgsSchema,
   chatForProvider,
   defaultAiSettings,
   publicAiSettings,
@@ -47,10 +59,8 @@ import {
   resolveMainOwnedAiConfig,
   sanitizeRendererAiSettingsUpdate,
   streamForProvider,
-  type AiChatRequest,
   type AiSettings,
   type AiStreamChunk,
-  type AiStreamRequest,
   type GenSparkAccountStatus,
   type LegacyAiSettings,
 } from '@genoffice/ai-provider'
@@ -2310,15 +2320,17 @@ function loadStoredAiSettings(): Partial<AiSettings> & LegacyAiSettings {
  * sheets' standalone AI handlers use the same channel names.
  */
 export function registerAiIpc(): void {
-  ipcMain.handle('ai:get-settings', (): AiSettings => {
+  safeHandle(ipcMain, 'ai:get-settings', aiEmptyArgsSchema, (): AiSettings => {
     const stored = loadStoredAiSettings()
     const settings = resolveAiSettings(stored, defaultAiSettings())
     return publicAiSettings(settings)
   })
 
   // Genspark account (gsk login state): auth source for AI features; the frontend uses it to prompt login when logged out
-  ipcMain.handle(
+  safeHandle(
+    ipcMain,
     'ai:gsk-status',
+    aiGskStatusArgsSchema,
     async (_event, withEmail?: boolean): Promise<GenSparkAccountStatus> => {
       if (!hasGskAuth()) return { loggedIn: false }
       if (!withEmail) return { loggedIn: true }
@@ -2327,13 +2339,14 @@ export function registerAiIpc(): void {
     },
   )
 
-  ipcMain.handle('ai:gsk-login', () => {
+  safeHandle(ipcMain, 'ai:gsk-login', aiEmptyArgsSchema, () => {
     gskLogin()
   })
 
-  ipcMain.handle('ai:set-settings', (_event, settings: unknown) => {
+  safeHandle(ipcMain, 'ai:set-settings', aiSetSettingsArgsSchema, (_event, settings) => {
     // Migrate first; only write preferences when migration is safe so we never
     // wipe unrecovered plaintext keys (skipped_insecure_storage / failed).
+    // Schema rejects apiKey/baseUrl/provider; sanitize allowlists the model.
     return applyAiSettingsPreferencesUpdate({
       settingsPath: SETTINGS_PATH(),
       vaultPath: AI_SECRETS_VAULT_PATH(),
@@ -2344,14 +2357,15 @@ export function registerAiIpc(): void {
     })
   })
 
-  ipcMain.handle('ai:stream', async (event, request: AiStreamRequest) => {
+  safeHandle(ipcMain, 'ai:stream', aiStreamArgsSchema, async (event, request) => {
     const { requestId, system, messages } = request
     const tools = request.tools ?? []
     const maxTokens = request.maxTokens ?? 8192
     const stored = loadStoredAiSettings()
     const { provider, config } = resolveMainOwnedAiConfig(stored, gskApiKey)
     const send = (chunk: AiStreamChunk) => {
-      if (!event.sender.isDestroyed()) event.sender.send('ai:stream-chunk', chunk)
+      const inv = event as IpcMainInvokeEvent
+      if (!inv.sender.isDestroyed()) inv.sender.send('ai:stream-chunk', chunk)
     }
     if (!config.apiKey) {
       send({
@@ -2385,7 +2399,7 @@ export function registerAiIpc(): void {
     }
   })
 
-  ipcMain.handle('ai:stream-cancel', (_event, requestId: string) => {
+  safeHandle(ipcMain, 'ai:stream-cancel', aiStreamCancelArgsSchema, (_event, requestId) => {
     activeAiStreams.get(requestId)?.abort()
   })
 
@@ -2431,7 +2445,7 @@ export function registerAiIpc(): void {
     },
   )
 
-  ipcMain.handle('ai:chat', async (_event, request: AiChatRequest) => {
+  safeHandle(ipcMain, 'ai:chat', aiChatArgsSchema, async (_event, request) => {
     const { system, user } = request
     const stored = loadStoredAiSettings()
     const { provider, config } = resolveMainOwnedAiConfig(stored, gskApiKey)
@@ -2742,8 +2756,9 @@ export function registerDocsIpc(): void {
     readJson<string[]>(RECENT_PATH(), []).filter((p) => existsSync(p)),
   )
 
-  ipcMain.handle('docs:pick-image', async (event) => {
-    const result = await openDialog(event, {
+  safeHandle(ipcMain, 'docs:pick-image', filesPickArgsSchema, async (event) => {
+    const inv = event as IpcMainInvokeEvent
+    const result = await openDialog(inv, {
       title: tm('dlgInsertImage'),
       filters: [{ name: tm('filterImages'), extensions: ['png', 'jpg', 'jpeg', 'gif'] }],
       properties: ['openFile'],
@@ -2760,30 +2775,36 @@ export function registerDocsIpc(): void {
     }
   })
 
-  ipcMain.handle('files:pick', async (event): Promise<AttachmentAddResult | null> => {
-    const result = await openDialog(event, {
-      title: tm('dlgAddAttachment'),
-      filters: [
-        { name: tm('filterSupported'), extensions: [...ATTACHMENT_EXTS] },
-        { name: tm('filterAll'), extensions: ['*'] },
-      ],
-      properties: ['openFile', 'multiSelections'],
-    })
-    if (result.canceled || result.filePaths.length === 0) return null
-    return collectAttachments(event, result.filePaths)
-  })
+  safeHandle(
+    ipcMain,
+    'files:pick',
+    filesPickArgsSchema,
+    async (event): Promise<AttachmentAddResult | null> => {
+      const inv = event as IpcMainInvokeEvent
+      const result = await openDialog(inv, {
+        title: tm('dlgAddAttachment'),
+        filters: [
+          { name: tm('filterSupported'), extensions: [...ATTACHMENT_EXTS] },
+          { name: tm('filterAll'), extensions: ['*'] },
+        ],
+        properties: ['openFile', 'multiSelections'],
+      })
+      if (result.canceled || result.filePaths.length === 0) return null
+      return collectAttachments(inv, result.filePaths)
+    },
+  )
 
-  ipcMain.handle('files:add', (event, paths: string[]) => collectAttachments(event, paths))
+  safeHandle(ipcMain, 'files:add', filesAddArgsSchema, (event, paths) =>
+    collectAttachments(event as IpcMainInvokeEvent, paths),
+  )
 
-  ipcMain.handle(
+  safeHandle(
+    ipcMain,
     'files:read',
-    async (
-      event,
-      filePath: string,
-      offset: number,
-      maxChars: number,
-    ): Promise<AttachmentReadResult> => {
-      const denied = denyUnlessGranted(event, filePath)
+    filesReadArgsSchema,
+    async (event, filePath, offset, maxChars): Promise<AttachmentReadResult> => {
+      const inv = event as IpcMainInvokeEvent
+      const denied = denyUnlessGranted(inv, filePath)
       if (denied) return { ok: false, error: denied }
       const name = basename(filePath)
       const ext = name.split('.').pop()?.toLowerCase() ?? ''
@@ -2809,31 +2830,39 @@ export function registerDocsIpc(): void {
   )
 
   // image attachments read raw bytes → base64; AiPanel puts them into the user message's images for multimodal
-  ipcMain.handle('files:read-image', (event, filePath: string): AttachmentImageResult => {
-    const denied = denyUnlessGranted(event, filePath)
-    if (denied) return { ok: false, error: denied }
-    const name = basename(filePath)
-    const ext = name.split('.').pop()?.toLowerCase() ?? ''
-    const mime = ATTACHMENT_IMAGE_MIME[ext]
-    if (!mime) return { ok: false, error: `${name}: ${tm('errNotImage')}` }
-    try {
-      const stat = statSync(filePath)
-      if (stat.size > ATTACHMENT_IMAGE_MAX_BYTES) {
-        return { ok: false, error: `${name}: ${tm('errImageTooLarge')}` }
+  safeHandle(
+    ipcMain,
+    'files:read-image',
+    filesReadImageArgsSchema,
+    (event, filePath): AttachmentImageResult => {
+      const inv = event as IpcMainInvokeEvent
+      const denied = denyUnlessGranted(inv, filePath)
+      if (denied) return { ok: false, error: denied }
+      const name = basename(filePath)
+      const ext = name.split('.').pop()?.toLowerCase() ?? ''
+      const mime = ATTACHMENT_IMAGE_MIME[ext]
+      if (!mime) return { ok: false, error: `${name}: ${tm('errNotImage')}` }
+      try {
+        const stat = statSync(filePath)
+        if (stat.size > ATTACHMENT_IMAGE_MAX_BYTES) {
+          return { ok: false, error: `${name}: ${tm('errImageTooLarge')}` }
+        }
+        return { ok: true, base64: readFileSync(filePath).toString('base64'), mime }
+      } catch {
+        return { ok: false, error: `${name}: ${tm('errUnreadable')}` }
       }
-      return { ok: true, base64: readFileSync(filePath).toString('base64'), mime }
-    } catch {
-      return { ok: false, error: `${name}: ${tm('errUnreadable')}` }
-    }
-  })
+    },
+  )
 
   // clipboard-pasted images (screenshots and other bitmaps with no local path): saved to a temp file then use the regular attachment path
-  ipcMain.handle(
+  safeHandle(
+    ipcMain,
     'files:add-pasted-image',
-    (event, data: unknown, ext: unknown): AttachmentAddResult => {
+    filesAddPastedImageArgsSchema,
+    (event, data, ext): AttachmentAddResult => {
       const filePath = savePastedImage(data, ext)
       return filePath
-        ? collectAttachments(event, [filePath])
+        ? collectAttachments(event as IpcMainInvokeEvent, [filePath])
         : { accepted: [], rejected: [tm('errNotImage')] }
     },
   )

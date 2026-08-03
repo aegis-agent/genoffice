@@ -37,3 +37,21 @@ export {
   type SafeStorageAdapter,
   type SecureEncryptionAssessment,
 } from './ai-settings-secrets'
+export { IpcValidationError, safeHandle, type IpcMainLike, type RuntimeSchema } from './safe-handle'
+export {
+  IPC_PATH_LIST_MAX,
+  IPC_PATH_MAX,
+  IPC_PASTED_IMAGE_EXT_MAX,
+  IPC_PASTED_IMAGE_MAX_BYTES,
+  IPC_READ_MAX_CHARS_MAX,
+  IPC_READ_OFFSET_MAX,
+  filesAddArgsSchema,
+  filesAddPastedImageArgsSchema,
+  filesPickArgsSchema,
+  filesReadArgsSchema,
+  filesReadImageArgsSchema,
+  type FilesAddArgs,
+  type FilesAddPastedImageArgs,
+  type FilesReadArgs,
+  type FilesReadImageArgs,
+} from './ipc-arg-schemas'

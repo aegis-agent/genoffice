@@ -33,21 +33,14 @@ describe('AI main-owned config wiring', () => {
     })
   }
 
-  it('sheets schemas reject settings on ai chat/stream requests', () => {
+  it('sheets re-exports canonical AI schemas from ai-provider (no local authority fields)', () => {
     const src = read('apps/sheets/src/shared/desktop-api.ts')
     expect(src).toMatch(/aiChatRequestSchema/)
     expect(src).toMatch(/aiStreamRequestSchema/)
-    // Request schemas must not accept a settings field.
-    const chatBlock = src.slice(
-      src.indexOf('export const aiChatRequestSchema'),
-      src.indexOf('export const aiStreamRequestSchema'),
-    )
-    const streamBlock = src.slice(
-      src.indexOf('export const aiStreamRequestSchema'),
-      src.indexOf('export type AiSettingsInput'),
-    )
-    expect(chatBlock).not.toMatch(/settings:/)
-    expect(streamBlock).not.toMatch(/settings:/)
+    expect(src).toMatch(/from '@genoffice\/ai-provider'/)
+    // Local duplicate agent/AI request schemas should be gone.
+    expect(src).not.toMatch(/const agentMessageSchema/)
+    expect(src).not.toMatch(/const aiProviderConfigSchema/)
   })
 
   it('agent-core IPC transport no longer injects settings into stream starts', () => {
