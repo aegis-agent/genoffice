@@ -4,6 +4,7 @@ import type {
   AiChatRequest,
   AiChatResponse,
   AiSettings,
+  AiSettingsPreferencesUpdate,
   AiStreamChunk,
   AiStreamRequest,
   GenSparkAccountStatus,
@@ -1674,101 +1675,18 @@ export type WorkbookCellStyle = z.infer<typeof cellStyleSchema>
 export type WorkbookRichRun = z.infer<typeof richRunSchema>
 export type WorkbookConditionalRule = z.infer<typeof conditionalRuleSchema>
 
-// ---- AI settings + chat/stream: canonical types live in @genoffice/ai-provider,
-// shared with apps/docs. Validated here like every other renderer→main request in
-// this file; the validated shape is cast to AiSettings at the main-process call
-// site, which always has exactly the 5 known provider keys once merged through
-// resolveAiSettings/defaultAiSettings. ----
+// ---- AI chat/stream + preference updates: canonical schemas live in
+// @genoffice/ai-provider (shared with docs/slides). Re-exported here so sheets
+// tests and shared desktop-api consumers keep a single import path. ----
 
-const aiProviderConfigSchema = z
-  .object({
-    apiKey: z.string(),
-    model: z.string(),
-    baseUrl: z.string().optional(),
-  })
-  .strict()
-
-export const aiSettingsInputSchema = z
-  .object({
-    provider: z.string().min(1),
-    providers: z.record(z.string(), aiProviderConfigSchema),
-  })
-  .strict()
-
-const agentToolResultSchema = z
-  .object({
-    id: z.string(),
-    name: z.string(),
-    output: z.string(),
-    isError: z.boolean().optional(),
-  })
-  .strict()
-
-const agentToolCallSchema = z
-  .object({
-    id: z.string(),
-    name: z.string(),
-    input: z.record(z.string(), z.unknown()),
-  })
-  .strict()
-
-/// Inline vision input on a user turn (image attachments, base64 without data: prefix).
-const agentImageSchema = z
-  .object({
-    base64: z.string().min(1),
-    mime: z.string().min(1).max(64),
-  })
-  .strict()
-
-const agentMessageSchema = z.union([
-  z
-    .object({
-      role: z.literal('user'),
-      text: z.string(),
-      images: z.array(agentImageSchema).max(20).optional(),
-    })
-    .strict(),
-  z
-    .object({
-      role: z.literal('assistant'),
-      text: z.string(),
-      toolCalls: z.array(agentToolCallSchema).optional(),
-    })
-    .strict(),
-  z.object({ role: z.literal('tool'), results: z.array(agentToolResultSchema) }).strict(),
-])
-
-const agentToolDefSchema = z
-  .object({
-    name: z.string(),
-    description: z.string(),
-    inputSchema: z.record(z.string(), z.unknown()),
-  })
-  .strict()
-
-const MAX_AI_MESSAGES = 500
-const MAX_AI_TOOLS = 50
-
-export const aiChatRequestSchema = z
-  .object({
-    system: z.string(),
-    user: z.string(),
-  })
-  .strict()
-
-export const aiStreamRequestSchema = z
-  .object({
-    requestId: z.string().min(1),
-    system: z.string(),
-    messages: z.array(agentMessageSchema).max(MAX_AI_MESSAGES),
-    tools: z.array(agentToolDefSchema).max(MAX_AI_TOOLS).optional(),
-    maxTokens: z.number().int().positive().optional(),
-  })
-  .strict()
-
-export type AiSettingsInput = z.infer<typeof aiSettingsInputSchema>
-export type AiChatRequestInput = z.infer<typeof aiChatRequestSchema>
-export type AiStreamRequestInput = z.infer<typeof aiStreamRequestSchema>
+export {
+  aiChatRequestSchema,
+  aiSettingsPreferencesUpdateSchema as aiSettingsInputSchema,
+  aiStreamRequestSchema,
+  type AiChatRequestParsed as AiChatRequestInput,
+  type AiSettingsPreferencesUpdate as AiSettingsInput,
+  type AiStreamRequestParsed as AiStreamRequestInput,
+} from '@genoffice/ai-provider'
 
 /// A rendered print job: the renderer lays the sheet out as HTML, the main
 /// process turns it into a PDF via a hidden window.
@@ -1893,7 +1811,7 @@ export interface DesktopApi {
   /// shell home.
   consumeNewBlankWorkbook(): Promise<boolean>
   getAiSettings(): Promise<AiSettings>
-  setAiSettings(settings: AiSettings): Promise<void>
+  setAiSettings(settings: AiSettingsPreferencesUpdate): Promise<void>
   aiChat(request: AiChatRequest): Promise<AiChatResponse>
   /// start a streaming AI call; deltas arrive via onAiStream with the same requestId
   aiStream(request: AiStreamRequest): Promise<void>

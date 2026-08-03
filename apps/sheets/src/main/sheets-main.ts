@@ -35,15 +35,27 @@ import { z } from 'zod'
 import {
   AI_PROVIDER_SECRETS_VAULT_FILENAME,
   applyAiSettingsPreferencesUpdate,
+  filesAddArgsSchema,
+  filesAddPastedImageArgsSchema,
+  filesPickArgsSchema,
+  filesReadArgsSchema,
+  filesReadImageArgsSchema,
   installNavigationGuard,
   loadAiSettingsJson,
   ReadablePathGrantRegistry,
   safeExternalUrl,
+  safeHandle,
 } from '@genoffice/electron-utils'
 import { createI18n, getUiLang, type Lang, normalizeLang, setUiLang } from '@genoffice/i18n'
 import { ProjectStore } from '@genoffice/project-store'
 
 import {
+  aiChatArgsSchema,
+  aiEmptyArgsSchema,
+  aiGskStatusArgsSchema,
+  aiSetSettingsArgsSchema,
+  aiStreamArgsSchema,
+  aiStreamCancelArgsSchema,
   chatForProvider,
   defaultAiSettings,
   publicAiSettings,
@@ -79,8 +91,6 @@ import type {
 } from '../shared/desktop-api'
 import {
   ATTACHMENT_IMAGE_EXTS,
-  aiChatRequestSchema,
-  aiStreamRequestSchema,
   workbookFileSchema,
   workbookFormulaCellsRequestSchema,
   workbookFormulaCellsResultSchema,
@@ -1932,47 +1942,56 @@ export function registerSheetsIpc(): void {
 
   // ── Chat attachments (same structure as the docs/slides files:* pipeline) ──
 
-  ipcMain.handle(IPC_CHANNELS.filesPick, async (event): Promise<AttachmentAddResult | null> => {
-    sessionFor(event)
-    const selection = await openFileDialog(event, {
-      title: tm('dlgAddAttachment'),
-      filters: [
-        { name: tm('filterSupported'), extensions: [...ATTACHMENT_EXTS] },
-        { name: tm('filterAll'), extensions: ['*'] },
-      ],
-      properties: ['openFile', 'multiSelections'],
-    })
-    if (selection.canceled || selection.filePaths.length === 0) return null
-    return collectAttachments(event, selection.filePaths)
-  })
+  safeHandle(
+    ipcMain,
+    IPC_CHANNELS.filesPick,
+    filesPickArgsSchema,
+    async (event): Promise<AttachmentAddResult | null> => {
+      const inv = event as IpcMainInvokeEvent
+      sessionFor(inv)
+      const selection = await openFileDialog(inv, {
+        title: tm('dlgAddAttachment'),
+        filters: [
+          { name: tm('filterSupported'), extensions: [...ATTACHMENT_EXTS] },
+          { name: tm('filterAll'), extensions: ['*'] },
+        ],
+        properties: ['openFile', 'multiSelections'],
+      })
+      if (selection.canceled || selection.filePaths.length === 0) return null
+      return collectAttachments(inv, selection.filePaths)
+    },
+  )
 
-  ipcMain.handle(IPC_CHANNELS.filesAdd, (event, paths: unknown): AttachmentAddResult => {
-    sessionFor(event)
-    return collectAttachments(event, z.array(z.string().min(1).max(1024)).max(50).parse(paths))
-  })
+  safeHandle(
+    ipcMain,
+    IPC_CHANNELS.filesAdd,
+    filesAddArgsSchema,
+    (event, paths): AttachmentAddResult => {
+      const inv = event as IpcMainInvokeEvent
+      sessionFor(inv)
+      return collectAttachments(inv, paths)
+    },
+  )
 
-  ipcMain.handle(
+  safeHandle(
+    ipcMain,
     IPC_CHANNELS.filesRead,
-    async (
-      event,
-      filePath: unknown,
-      offset: unknown,
-      maxChars: unknown,
-    ): Promise<AttachmentReadResult> => {
-      sessionFor(event)
-      const validatedPath = z.string().min(1).max(1024).parse(filePath)
-      const denied = denyUnlessGranted(event, validatedPath)
+    filesReadArgsSchema,
+    async (event, filePath, offset, maxChars): Promise<AttachmentReadResult> => {
+      const inv = event as IpcMainInvokeEvent
+      sessionFor(inv)
+      const denied = denyUnlessGranted(inv, filePath)
       if (denied) return { ok: false, error: denied }
-      const name = basename(validatedPath)
+      const name = basename(filePath)
       const ext = name.split('.').pop()?.toLowerCase() ?? ''
       if (!ATTACHMENT_EXTS.has(ext)) return { ok: false, error: tm('errUnsupportedExt', { ext }) }
       if (ATTACHMENT_IMAGE_EXTS.has(ext)) {
         return { ok: false, error: tm('errImageNoText') }
       }
       try {
-        const text = await extractAttachmentText(validatedPath)
-        const start = Math.max(0, Math.floor(Number(offset)) || 0)
-        const size = Math.min(Math.max(1, Math.floor(Number(maxChars)) || 1), 48_000)
+        const text = await extractAttachmentText(filePath)
+        const start = Math.max(0, Math.floor(offset) || 0)
+        const size = Math.min(Math.max(1, Math.floor(maxChars) || 1), 48_000)
         return {
           ok: true,
           name,
@@ -1988,35 +2007,43 @@ export function registerSheetsIpc(): void {
 
   // Image attachments read raw bytes → base64; the renderer puts them into the
   // user message's images for multimodal input
-  ipcMain.handle(IPC_CHANNELS.filesReadImage, (event, filePath: unknown): AttachmentImageResult => {
-    sessionFor(event)
-    const validatedPath = z.string().min(1).max(1024).parse(filePath)
-    const denied = denyUnlessGranted(event, validatedPath)
-    if (denied) return { ok: false, error: denied }
-    const name = basename(validatedPath)
-    const ext = name.split('.').pop()?.toLowerCase() ?? ''
-    const mime = ATTACHMENT_IMAGE_MIME[ext]
-    if (!mime) return { ok: false, error: `${name}: ${tm('errNotImage')}` }
-    try {
-      const stat = statSync(validatedPath)
-      if (stat.size > ATTACHMENT_IMAGE_MAX_BYTES) {
-        return { ok: false, error: `${name}: ${tm('errImageTooLarge')}` }
+  safeHandle(
+    ipcMain,
+    IPC_CHANNELS.filesReadImage,
+    filesReadImageArgsSchema,
+    (event, filePath): AttachmentImageResult => {
+      const inv = event as IpcMainInvokeEvent
+      sessionFor(inv)
+      const denied = denyUnlessGranted(inv, filePath)
+      if (denied) return { ok: false, error: denied }
+      const name = basename(filePath)
+      const ext = name.split('.').pop()?.toLowerCase() ?? ''
+      const mime = ATTACHMENT_IMAGE_MIME[ext]
+      if (!mime) return { ok: false, error: `${name}: ${tm('errNotImage')}` }
+      try {
+        const stat = statSync(filePath)
+        if (stat.size > ATTACHMENT_IMAGE_MAX_BYTES) {
+          return { ok: false, error: `${name}: ${tm('errImageTooLarge')}` }
+        }
+        return { ok: true, base64: readFileSync(filePath).toString('base64'), mime }
+      } catch {
+        return { ok: false, error: `${name}: ${tm('errUnreadable')}` }
       }
-      return { ok: true, base64: readFileSync(validatedPath).toString('base64'), mime }
-    } catch {
-      return { ok: false, error: `${name}: ${tm('errUnreadable')}` }
-    }
-  })
+    },
+  )
 
   // Clipboard-pasted images (screenshots and other bitmaps without a local
   // path): persisted to a temp file, then go through the regular attachment flow
-  ipcMain.handle(
+  safeHandle(
+    ipcMain,
     IPC_CHANNELS.filesAddPastedImage,
-    (event, data: unknown, ext: unknown): AttachmentAddResult => {
-      sessionFor(event)
+    filesAddPastedImageArgsSchema,
+    (event, data, ext): AttachmentAddResult => {
+      const inv = event as IpcMainInvokeEvent
+      sessionFor(inv)
       const filePath = savePastedImage(data, ext)
       return filePath
-        ? collectAttachments(event, [filePath])
+        ? collectAttachments(inv, [filePath])
         : { accepted: [], rejected: [tm('errNotImage')] }
     },
   )
@@ -2028,8 +2055,8 @@ export function registerSheetsAiIpc(): void {
   if (aiIpcRegistered) return
   aiIpcRegistered = true
 
-  ipcMain.handle(IPC_CHANNELS.aiGetSettings, (event): AiSettings => {
-    sessionFor(event)
+  safeHandle(ipcMain, IPC_CHANNELS.aiGetSettings, aiEmptyArgsSchema, (event): AiSettings => {
+    sessionFor(event as IpcMainInvokeEvent)
     const stored = loadStoredAiSettings()
     const settings = resolveAiSettings(stored, defaultAiSettings())
     return publicAiSettings(settings)
@@ -2037,9 +2064,11 @@ export function registerSheetsAiIpc(): void {
 
   // Genspark account (gsk login state): the auth source for AI features; the
   // frontend uses it to guide sign-in when logged out
-  ipcMain.handle(
+  safeHandle(
+    ipcMain,
     IPC_CHANNELS.aiGskStatus,
-    async (_event, withEmail?: unknown): Promise<GenSparkAccountStatus> => {
+    aiGskStatusArgsSchema,
+    async (_event, withEmail?: boolean): Promise<GenSparkAccountStatus> => {
       if (!hasGskAuth()) return { loggedIn: false }
       if (!withEmail) return { loggedIn: true }
       const info = await gskLoginInfo()
@@ -2047,14 +2076,15 @@ export function registerSheetsAiIpc(): void {
     },
   )
 
-  ipcMain.handle(IPC_CHANNELS.aiGskLogin, () => {
+  safeHandle(ipcMain, IPC_CHANNELS.aiGskLogin, aiEmptyArgsSchema, () => {
     gskLogin()
   })
 
-  ipcMain.handle(IPC_CHANNELS.aiSetSettings, (event, input: unknown) => {
-    sessionFor(event)
+  safeHandle(ipcMain, IPC_CHANNELS.aiSetSettings, aiSetSettingsArgsSchema, (event, input) => {
+    sessionFor(event as IpcMainInvokeEvent)
     // Migrate first; only write preferences when migration is safe so we never
     // wipe unrecovered plaintext keys (skipped_insecure_storage / failed).
+    // Schema rejects apiKey/baseUrl/provider; sanitize allowlists the model.
     return applyAiSettingsPreferencesUpdate({
       settingsPath: SETTINGS_PATH(),
       vaultPath: AI_SECRETS_VAULT_PATH(),
@@ -2065,9 +2095,8 @@ export function registerSheetsAiIpc(): void {
     })
   })
 
-  ipcMain.handle(IPC_CHANNELS.aiChat, async (event, input: unknown) => {
-    sessionFor(event)
-    const request = aiChatRequestSchema.parse(input)
+  safeHandle(ipcMain, IPC_CHANNELS.aiChat, aiChatArgsSchema, async (event, request) => {
+    sessionFor(event as IpcMainInvokeEvent)
     const stored = loadStoredAiSettings()
     const { provider, config } = resolveMainOwnedAiConfig(stored, gskApiKey)
     if (!config.apiKey) {
@@ -2084,16 +2113,16 @@ export function registerSheetsAiIpc(): void {
     }
   })
 
-  ipcMain.handle(IPC_CHANNELS.aiStream, async (event, input: unknown) => {
-    const entry = sessionFor(event)
-    const request = aiStreamRequestSchema.parse(input)
+  safeHandle(ipcMain, IPC_CHANNELS.aiStream, aiStreamArgsSchema, async (event, request) => {
+    const inv = event as IpcMainInvokeEvent
+    const entry = sessionFor(inv)
     const { requestId, system, messages } = request
     const tools = request.tools ?? []
     const maxTokens = request.maxTokens ?? 8192
     const stored = loadStoredAiSettings()
     const { provider, config } = resolveMainOwnedAiConfig(stored, gskApiKey)
     const send = (chunk: AiStreamChunk) => {
-      if (!event.sender.isDestroyed()) event.sender.send(IPC_CHANNELS.aiStreamChunk, chunk)
+      if (!inv.sender.isDestroyed()) inv.sender.send(IPC_CHANNELS.aiStreamChunk, chunk)
     }
     if (!config.apiKey) {
       send({
@@ -2127,9 +2156,9 @@ export function registerSheetsAiIpc(): void {
     }
   })
 
-  ipcMain.handle(IPC_CHANNELS.aiStreamCancel, (event, requestId: unknown) => {
-    const entry = sessionFor(event)
-    entry.aiStreams.get(z.string().min(1).parse(requestId))?.abort()
+  safeHandle(ipcMain, IPC_CHANNELS.aiStreamCancel, aiStreamCancelArgsSchema, (event, requestId) => {
+    const entry = sessionFor(event as IpcMainInvokeEvent)
+    entry.aiStreams.get(requestId)?.abort()
   })
 
   // Shared search tools (content + images): Serper with DuckDuckGo fallback

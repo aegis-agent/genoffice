@@ -13,8 +13,16 @@ All application windows run with the full Electron renderer lockdown:
 
 - `contextIsolation: true`, `nodeIntegration: false`, `sandbox: true` for every
   document window and tab view (docs, sheets, slides, pdf, shell, updater).
-- Renderers reach the main process only through typed, validated IPC channels
-  (payloads are schema-checked in the main process; sheets uses zod end to end).
+- Renderers reach the main process only through typed IPC channels. High-risk
+  file/attachment and AI handlers in Docs, Slides, and Sheets validate renderer
+  argument tuples at runtime through a shared main-process `safeHandle` helper
+  (`@genoffice/electron-utils`) and strict schemas (AI request/preference shapes
+  in `@genoffice/ai-provider`; path/attachment tuples shared from
+  electron-utils). Validation failures reject with a generic channel-specific
+  error and never embed payload values, secrets, local paths, or raw schema
+  messages. Remaining IPC channels are still incremental — this is not blanket
+  main-process schema coverage. Sheets continues to authorize via
+  `sessionFor(event)` after shape checks.
 - Every `shell.openExternal` call goes through a single shared gate
   (`@genoffice/electron-utils` → `safeExternalUrl`) that parses the URL and
   enforces a protocol allowlist (http/https; pdf link annotations additionally

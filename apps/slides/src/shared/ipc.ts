@@ -11,6 +11,7 @@ import type { RenderSlide } from '@genoffice/pptx-render'
 import type { SlideComment, SectionInfo } from '@genoffice/pptx-engine'
 import type {
   AiSettings,
+  AiSettingsPreferencesUpdate,
   AiStreamChunk,
   AiStreamRequest,
   GenSparkAccountStatus,
@@ -24,6 +25,7 @@ export type {
   AiProviderId,
   AiProviderMeta,
   AiSettings,
+  AiSettingsPreferencesUpdate,
   AiStreamChunk,
   AiStreamRequest,
   GenSparkAccountStatus,
@@ -1282,7 +1284,7 @@ export interface SlidesApi {
   /** The file was renamed externally (shell Home list rename) — pushes the new path, the renderer updates the title bar */
   onRenamed: (handler: (newPath: string) => void) => () => void
   getAiSettings: () => Promise<AiSettings>
-  setAiSettings: (settings: AiSettings) => Promise<void>
+  setAiSettings: (settings: AiSettingsPreferencesUpdate) => Promise<void>
   aiStream: (request: AiStreamRequest) => Promise<void>
   aiStreamCancel: (requestId: string) => Promise<void>
   /** Genspark account status (gsk login state); with withEmail also fetches the email (needs a network request, slower) */

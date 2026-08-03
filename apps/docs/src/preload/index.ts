@@ -3,7 +3,7 @@ import type { IpcRendererEvent } from 'electron'
 import { DroppedPathPermitGate } from '@genoffice/electron-utils/dropped-path-permits'
 import type {
   AiChatRequest,
-  AiSettings,
+  AiSettingsPreferencesUpdate,
   AiStreamChunk,
   AiStreamRequest,
   DesktopApi,
@@ -61,7 +61,8 @@ const api: DesktopApi = {
   saveMergedPdf: (defaultName: string, base64Parts: string[], outPath?: string) =>
     ipcRenderer.invoke('docs:save-merged-pdf', defaultName, base64Parts, outPath),
   getAiSettings: () => ipcRenderer.invoke('ai:get-settings'),
-  setAiSettings: (settings: AiSettings) => ipcRenderer.invoke('ai:set-settings', settings),
+  setAiSettings: (settings: AiSettingsPreferencesUpdate) =>
+    ipcRenderer.invoke('ai:set-settings', settings),
   aiChat: (request: AiChatRequest) => ipcRenderer.invoke('ai:chat', request),
   aiStream: (request: AiStreamRequest) => ipcRenderer.invoke('ai:stream', request),
   aiStreamCancel: (requestId: string) => ipcRenderer.invoke('ai:stream-cancel', requestId),

@@ -20,6 +20,7 @@ import type {
   AiChatRequest,
   AiChatResponse,
   AiSettings,
+  AiSettingsPreferencesUpdate,
   AiStreamChunk,
   AiStreamRequest,
   GenSparkAccountStatus,
@@ -32,6 +33,7 @@ export type {
   AiProviderId,
   AiProviderMeta,
   AiSettings,
+  AiSettingsPreferencesUpdate,
   AiStreamChunk,
   AiStreamRequest,
   GenSparkAccountStatus,
@@ -165,7 +167,8 @@ export interface DesktopApi {
   getRecentFiles(): Promise<string[]>
   pickImage(): Promise<PickImageResult | null>
   getAiSettings(): Promise<AiSettings>
-  setAiSettings(settings: AiSettings): Promise<void>
+  /** Preference-only update — no provider/apiKey/baseUrl. */
+  setAiSettings(settings: AiSettingsPreferencesUpdate): Promise<void>
   /** system print dialog for the current window */
   print(): Promise<void>
   /** render the document to PDF and ask where to save; size in twips */

@@ -24,7 +24,7 @@ describe('AI request schemas (renderer→main)', () => {
         settings: {
           provider: 'custom',
           providers: {
-            custom: { apiKey: 'sk', model: 'm', baseUrl: 'https://evil.example' },
+            custom: { apiKey: 'sk-evil', model: 'm', baseUrl: 'https://evil.example' },
           },
         },
       }),
@@ -42,14 +42,16 @@ describe('AI request schemas (renderer→main)', () => {
     ).toThrow()
   })
 
-  it('aiSettingsInputSchema still validates preference-shaped objects for set-settings', () => {
-    // Main sanitizes further; schema only needs a structured object.
+  it('aiSettingsInputSchema accepts preference-only updates and rejects secrets', () => {
     const parsed = aiSettingsInputSchema.parse({
-      provider: 'genspark',
-      providers: {
-        genspark: { apiKey: '', model: 'claude-opus-4-7' },
-      },
+      providers: { genspark: { model: 'claude-opus-4-7' } },
     })
-    expect(parsed.provider).toBe('genspark')
+    expect(parsed.providers.genspark.model).toBe('claude-opus-4-7')
+    expect(() =>
+      aiSettingsInputSchema.parse({
+        provider: 'genspark',
+        providers: { genspark: { apiKey: '', model: 'claude-opus-4-7' } },
+      }),
+    ).toThrow()
   })
 })

@@ -10,7 +10,15 @@ import type { IpcMainInvokeEvent } from 'electron'
 import { mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { basename, join } from 'node:path'
 import { parseFileToText } from '@genoffice/file-parse'
-import { ReadablePathGrantRegistry } from '@genoffice/electron-utils'
+import {
+  ReadablePathGrantRegistry,
+  filesAddArgsSchema,
+  filesAddPastedImageArgsSchema,
+  filesPickArgsSchema,
+  filesReadArgsSchema,
+  filesReadImageArgsSchema,
+  safeHandle,
+} from '@genoffice/electron-utils'
 import type {
   AttachmentAddResult,
   AttachmentImageResult,
@@ -167,34 +175,39 @@ async function extractAttachmentText(filePath: string): Promise<string> {
 
 /** Register the slides:files-* attachment channels (called from registerSlidesIpc). */
 export function registerAttachmentIpc(): void {
-  ipcMain.handle('slides:files-pick', async (event): Promise<AttachmentAddResult | null> => {
-    const parent = dialogParent()
-    const options = {
-      title: tm('dlgAddAttachment'),
-      filters: [
-        { name: tm('filterSupported'), extensions: [...ATTACHMENT_EXTS] },
-        { name: tm('filterAll'), extensions: ['*'] },
-      ],
-      properties: ['openFile' as const, 'multiSelections' as const],
-    }
-    const r = parent
-      ? await dialog.showOpenDialog(parent, options)
-      : await dialog.showOpenDialog(options)
-    if (r.canceled || r.filePaths.length === 0) return null
-    return collectAttachments(event, r.filePaths)
-  })
+  safeHandle(
+    ipcMain,
+    'slides:files-pick',
+    filesPickArgsSchema,
+    async (event): Promise<AttachmentAddResult | null> => {
+      const parent = dialogParent()
+      const options = {
+        title: tm('dlgAddAttachment'),
+        filters: [
+          { name: tm('filterSupported'), extensions: [...ATTACHMENT_EXTS] },
+          { name: tm('filterAll'), extensions: ['*'] },
+        ],
+        properties: ['openFile' as const, 'multiSelections' as const],
+      }
+      const r = parent
+        ? await dialog.showOpenDialog(parent, options)
+        : await dialog.showOpenDialog(options)
+      if (r.canceled || r.filePaths.length === 0) return null
+      return collectAttachments(event as IpcMainInvokeEvent, r.filePaths)
+    },
+  )
 
-  ipcMain.handle('slides:files-add', (event, paths: string[]) => collectAttachments(event, paths))
+  safeHandle(ipcMain, 'slides:files-add', filesAddArgsSchema, (event, paths) =>
+    collectAttachments(event as IpcMainInvokeEvent, paths),
+  )
 
-  ipcMain.handle(
+  safeHandle(
+    ipcMain,
     'slides:files-read',
-    async (
-      event,
-      filePath: string,
-      offset: number,
-      maxChars: number,
-    ): Promise<AttachmentReadResult> => {
-      const denied = denyUnlessGranted(event, filePath)
+    filesReadArgsSchema,
+    async (event, filePath, offset, maxChars): Promise<AttachmentReadResult> => {
+      const inv = event as IpcMainInvokeEvent
+      const denied = denyUnlessGranted(inv, filePath)
       if (denied) return { ok: false, error: denied }
       const name = basename(filePath)
       const ext = name.split('.').pop()?.toLowerCase() ?? ''
@@ -220,31 +233,39 @@ export function registerAttachmentIpc(): void {
   )
 
   // Image attachments read raw bytes -> base64; AiPanel puts them into the user message's images for multimodal
-  ipcMain.handle('slides:files-read-image', (event, filePath: string): AttachmentImageResult => {
-    const denied = denyUnlessGranted(event, filePath)
-    if (denied) return { ok: false, error: denied }
-    const name = basename(filePath)
-    const ext = name.split('.').pop()?.toLowerCase() ?? ''
-    const mime = ATTACHMENT_IMAGE_MIME[ext]
-    if (!mime) return { ok: false, error: `${name}: ${tm('errNotImage')}` }
-    try {
-      const stat = statSync(filePath)
-      if (stat.size > ATTACHMENT_IMAGE_MAX_BYTES) {
-        return { ok: false, error: `${name}: ${tm('errImageTooLarge')}` }
+  safeHandle(
+    ipcMain,
+    'slides:files-read-image',
+    filesReadImageArgsSchema,
+    (event, filePath): AttachmentImageResult => {
+      const inv = event as IpcMainInvokeEvent
+      const denied = denyUnlessGranted(inv, filePath)
+      if (denied) return { ok: false, error: denied }
+      const name = basename(filePath)
+      const ext = name.split('.').pop()?.toLowerCase() ?? ''
+      const mime = ATTACHMENT_IMAGE_MIME[ext]
+      if (!mime) return { ok: false, error: `${name}: ${tm('errNotImage')}` }
+      try {
+        const stat = statSync(filePath)
+        if (stat.size > ATTACHMENT_IMAGE_MAX_BYTES) {
+          return { ok: false, error: `${name}: ${tm('errImageTooLarge')}` }
+        }
+        return { ok: true, base64: readFileSync(filePath).toString('base64'), mime }
+      } catch {
+        return { ok: false, error: `${name}: ${tm('errUnreadable')}` }
       }
-      return { ok: true, base64: readFileSync(filePath).toString('base64'), mime }
-    } catch {
-      return { ok: false, error: `${name}: ${tm('errUnreadable')}` }
-    }
-  })
+    },
+  )
 
   // Clipboard-pasted images (screenshots and other bitmaps without a local path): saved to a temp file then take the regular attachment chain
-  ipcMain.handle(
+  safeHandle(
+    ipcMain,
     'slides:files-add-pasted-image',
-    (event, data: unknown, ext: unknown): AttachmentAddResult => {
+    filesAddPastedImageArgsSchema,
+    (event, data, ext): AttachmentAddResult => {
       const filePath = savePastedImage(data, ext)
       return filePath
-        ? collectAttachments(event, [filePath])
+        ? collectAttachments(event as IpcMainInvokeEvent, [filePath])
         : { accepted: [], rejected: [tm('errNotImage')] }
     },
   )
