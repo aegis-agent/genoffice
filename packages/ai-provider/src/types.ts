@@ -36,8 +36,11 @@ export interface LegacyAiSettings {
   model?: string
 }
 
+/**
+ * Renderer→main one-shot chat request. Provider config and API keys are
+ * main-owned and MUST NOT appear on this payload.
+ */
 export interface AiChatRequest {
-  settings: AiSettings
   system: string
   user: string
 }
@@ -48,9 +51,12 @@ export interface AiChatResponse {
   error?: string
 }
 
+/**
+ * Renderer→main streaming request. Provider config and API keys are
+ * main-owned and MUST NOT appear on this payload.
+ */
 export interface AiStreamRequest {
   requestId: string
-  settings: AiSettings
   system: string
   messages: AgentMessage[]
   tools?: AgentToolDef[]
@@ -64,4 +70,17 @@ export interface AiStreamChunk {
   /** complete parsed tool call (emitted once its arguments finish streaming) */
   toolCall?: AgentToolCall
   error?: string
+}
+
+/**
+ * Explicit network-policy hook required for provider=custom. Fixed known
+ * providers continue to use global fetch; custom must not silently do so.
+ */
+export type CustomProviderFetch = (
+  input: string | URL | Request,
+  init?: RequestInit,
+) => Promise<Response>
+
+export interface ProviderNetworkOptions {
+  customFetch?: CustomProviderFetch
 }

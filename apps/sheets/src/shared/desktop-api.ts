@@ -1751,7 +1751,6 @@ const MAX_AI_TOOLS = 50
 
 export const aiChatRequestSchema = z
   .object({
-    settings: aiSettingsInputSchema,
     system: z.string(),
     user: z.string(),
   })
@@ -1760,7 +1759,6 @@ export const aiChatRequestSchema = z
 export const aiStreamRequestSchema = z
   .object({
     requestId: z.string().min(1),
-    settings: aiSettingsInputSchema,
     system: z.string(),
     messages: z.array(agentMessageSchema).max(MAX_AI_MESSAGES),
     tools: z.array(agentToolDefSchema).max(MAX_AI_TOOLS).optional(),

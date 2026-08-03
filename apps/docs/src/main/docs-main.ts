@@ -10,10 +10,22 @@ import {
   writeFileSync,
 } from 'node:fs'
 import { basename, join } from 'node:path'
-import { BrowserWindow, Menu, WebContentsView, app, dialog, ipcMain, shell } from 'electron'
 import {
+  BrowserWindow,
+  Menu,
+  WebContentsView,
+  app,
+  dialog,
+  ipcMain,
+  safeStorage,
+  shell,
+} from 'electron'
+import {
+  AI_PROVIDER_SECRETS_VAULT_FILENAME,
+  applyAiSettingsPreferencesUpdate,
   fetchWithSsrfGuard,
   installNavigationGuard,
+  loadAiSettingsJson,
   ReadablePathGrantRegistry,
   safeExternalUrl,
 } from '@genoffice/electron-utils'
@@ -30,7 +42,10 @@ import { parseFileToText } from '@genoffice/file-parse'
 import {
   chatForProvider,
   defaultAiSettings,
+  publicAiSettings,
   resolveAiSettings,
+  resolveMainOwnedAiConfig,
+  sanitizeRendererAiSettingsUpdate,
   streamForProvider,
   type AiChatRequest,
   type AiSettings,
@@ -2274,8 +2289,20 @@ const TWIPS_PER_INCH = 1440
 // implementations live in @genoffice/ai-provider, shared with apps/sheets.
 
 const SETTINGS_PATH = () => userDataPath('ai-settings.json')
+const AI_SECRETS_VAULT_PATH = () => userDataPath(AI_PROVIDER_SECRETS_VAULT_FILENAME)
 
 const activeAiStreams = new Map<string, AbortController>()
+
+/** Migrate legacy plaintext provider secrets (if any), then read preference JSON. */
+function loadStoredAiSettings(): Partial<AiSettings> & LegacyAiSettings {
+  return loadAiSettingsJson({
+    settingsPath: SETTINGS_PATH(),
+    vaultPath: AI_SECRETS_VAULT_PATH(),
+    safeStorage,
+    toPreferenceOnly: (raw) => sanitizeRendererAiSettingsUpdate(raw),
+    log: (msg) => console.info(`[ai-settings] ${msg}`),
+  }) as Partial<AiSettings> & LegacyAiSettings
+}
 
 /**
  * AI settings + chat/stream proxy handlers. Split out so the shell can
@@ -2284,11 +2311,9 @@ const activeAiStreams = new Map<string, AbortController>()
  */
 export function registerAiIpc(): void {
   ipcMain.handle('ai:get-settings', (): AiSettings => {
-    const stored = readJson<Partial<AiSettings> & LegacyAiSettings>(SETTINGS_PATH(), {})
+    const stored = loadStoredAiSettings()
     const settings = resolveAiSettings(stored, defaultAiSettings())
-    // AI features all go through Genspark (gsk login); legacy settings with another provider are reset
-    settings.provider = 'genspark'
-    return settings
+    return publicAiSettings(settings)
   })
 
   // Genspark account (gsk login state): auth source for AI features; the frontend uses it to prompt login when logged out
@@ -2306,28 +2331,33 @@ export function registerAiIpc(): void {
     gskLogin()
   })
 
-  ipcMain.handle('ai:set-settings', (_event, settings: AiSettings) => {
-    writeJson(SETTINGS_PATH(), settings)
+  ipcMain.handle('ai:set-settings', (_event, settings: unknown) => {
+    // Migrate first; only write preferences when migration is safe so we never
+    // wipe unrecovered plaintext keys (skipped_insecure_storage / failed).
+    return applyAiSettingsPreferencesUpdate({
+      settingsPath: SETTINGS_PATH(),
+      vaultPath: AI_SECRETS_VAULT_PATH(),
+      safeStorage,
+      toPreferenceOnly: (raw) => sanitizeRendererAiSettingsUpdate(raw),
+      preferences: sanitizeRendererAiSettingsUpdate(settings),
+      log: (msg) => console.info(`[ai-settings] ${msg}`),
+    })
   })
 
   ipcMain.handle('ai:stream', async (event, request: AiStreamRequest) => {
-    const { requestId, settings, system, messages } = request
+    const { requestId, system, messages } = request
     const tools = request.tools ?? []
     const maxTokens = request.maxTokens ?? 8192
-    const provider = settings.provider
-    let config = settings.providers?.[provider]
-    // the genspark key never enters the settings file; requests take it from the gsk login state
-    if (provider === 'genspark' && config && !config.apiKey) {
-      config = { ...config, apiKey: gskApiKey() }
-    }
+    const stored = loadStoredAiSettings()
+    const { provider, config } = resolveMainOwnedAiConfig(stored, gskApiKey)
     const send = (chunk: AiStreamChunk) => {
       if (!event.sender.isDestroyed()) event.sender.send('ai:stream-chunk', chunk)
     }
-    if (!config?.apiKey) {
+    if (!config.apiKey) {
       send({
         requestId,
         type: 'error',
-        error: provider === 'genspark' ? tm('errGskNotLoggedIn') : tm('errNoApiKey', { provider }),
+        error: tm('errGskNotLoggedIn'),
       })
       return
     }
@@ -2402,16 +2432,13 @@ export function registerAiIpc(): void {
   )
 
   ipcMain.handle('ai:chat', async (_event, request: AiChatRequest) => {
-    const { settings, system, user } = request
-    const provider = settings.provider
-    let config = settings.providers?.[provider]
-    if (provider === 'genspark' && config && !config.apiKey) {
-      config = { ...config, apiKey: gskApiKey() }
-    }
-    if (!config?.apiKey) {
+    const { system, user } = request
+    const stored = loadStoredAiSettings()
+    const { provider, config } = resolveMainOwnedAiConfig(stored, gskApiKey)
+    if (!config.apiKey) {
       return {
         ok: false,
-        error: provider === 'genspark' ? tm('errGskNotLoggedIn') : tm('errNoApiKey', { provider }),
+        error: tm('errGskNotLoggedIn'),
       }
     }
     if (!config.model) return { ok: false, error: tm('errNoModel') }
