@@ -1,7 +1,12 @@
 import type { AgentMessage, AgentToolCall, AgentToolDef } from '@genoffice/agent-core'
 import { httpBodyDetail } from './http-error'
 import { GENSPARK_LLM_BASE_URLS } from './providers'
-import type { AiProviderConfig, AiProviderId } from './types'
+import type {
+  AiProviderConfig,
+  AiProviderId,
+  CustomProviderFetch,
+  ProviderNetworkOptions,
+} from './types'
 
 // ---- streaming (SSE line splitting shared by all providers) ----
 
@@ -356,8 +361,9 @@ export async function streamOpenAiCompatible(
   tools: AgentToolDef[],
   maxTokens: number,
   cb: StreamCallbacks,
+  fetchImpl: CustomProviderFetch = fetch,
 ): Promise<void> {
-  const response = await fetch(`${baseUrl.replace(/\/$/, '')}/chat/completions`, {
+  const response = await fetchImpl(`${baseUrl.replace(/\/$/, '')}/chat/completions`, {
     method: 'POST',
     signal: cb.signal,
     headers: {
@@ -445,6 +451,7 @@ export async function streamForProvider(
   tools: AgentToolDef[],
   maxTokens: number,
   cb: StreamCallbacks,
+  network?: ProviderNetworkOptions,
 ): Promise<void> {
   switch (provider) {
     case 'genspark':
@@ -496,9 +503,24 @@ export async function streamForProvider(
         maxTokens,
         cb,
       )
-    case 'custom':
+    case 'custom': {
+      if (!network?.customFetch) {
+        throw new Error(
+          'Custom provider requires an explicit customFetch network-policy callback (fail closed)',
+        )
+      }
       if (!config.baseUrl) throw new Error('A custom provider requires a Base URL')
-      return streamOpenAiCompatible(config.baseUrl, config, system, messages, tools, maxTokens, cb)
+      return streamOpenAiCompatible(
+        config.baseUrl,
+        config,
+        system,
+        messages,
+        tools,
+        maxTokens,
+        cb,
+        network.customFetch,
+      )
+    }
     default:
       throw new Error(`Unknown provider: ${provider}`)
   }

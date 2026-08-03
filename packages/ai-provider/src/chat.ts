@@ -1,6 +1,12 @@
 import { httpBodyDetail } from './http-error'
 import { GENSPARK_LLM_BASE_URLS } from './providers'
-import type { AiChatResponse, AiProviderConfig, AiProviderId } from './types'
+import type {
+  AiChatResponse,
+  AiProviderConfig,
+  AiProviderId,
+  CustomProviderFetch,
+  ProviderNetworkOptions,
+} from './types'
 
 async function chatAnthropic(
   config: AiProviderConfig,
@@ -25,7 +31,10 @@ async function chatAnthropic(
     }),
   })
   if (!response.ok) {
-    return { ok: false, error: `Claude HTTP ${response.status}: ${httpBodyDetail(await response.text())}` }
+    return {
+      ok: false,
+      error: `Claude HTTP ${response.status}: ${httpBodyDetail(await response.text())}`,
+    }
   }
   const json = (await response.json()) as { content?: Array<{ type: string; text?: string }> }
   const content = json.content
@@ -53,7 +62,10 @@ async function chatGemini(
     }),
   })
   if (!response.ok) {
-    return { ok: false, error: `Gemini HTTP ${response.status}: ${httpBodyDetail(await response.text())}` }
+    return {
+      ok: false,
+      error: `Gemini HTTP ${response.status}: ${httpBodyDetail(await response.text())}`,
+    }
   }
   const json = (await response.json()) as {
     candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>
@@ -68,8 +80,9 @@ async function chatOpenAiCompatible(
   config: AiProviderConfig,
   system: string,
   user: string,
+  fetchImpl: CustomProviderFetch = fetch,
 ): Promise<AiChatResponse> {
-  const response = await fetch(`${baseUrl.replace(/\/$/, '')}/chat/completions`, {
+  const response = await fetchImpl(`${baseUrl.replace(/\/$/, '')}/chat/completions`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -104,6 +117,7 @@ export async function chatForProvider(
   config: AiProviderConfig,
   system: string,
   user: string,
+  network?: ProviderNetworkOptions,
 ): Promise<AiChatResponse> {
   switch (provider) {
     case 'genspark':
@@ -121,9 +135,17 @@ export async function chatForProvider(
     case 'deepseek':
     case 'openai':
       return chatOpenAiCompatible(OPENAI_COMPATIBLE_BASE_URLS[provider]!, config, system, user)
-    case 'custom':
+    case 'custom': {
+      if (!network?.customFetch) {
+        return {
+          ok: false,
+          error:
+            'Custom provider requires an explicit customFetch network-policy callback (fail closed)',
+        }
+      }
       if (!config.baseUrl) return { ok: false, error: 'A custom provider requires a Base URL' }
-      return chatOpenAiCompatible(config.baseUrl, config, system, user)
+      return chatOpenAiCompatible(config.baseUrl, config, system, user, network.customFetch)
+    }
     default:
       return { ok: false, error: `Unknown provider: ${provider}` }
   }

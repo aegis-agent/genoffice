@@ -474,24 +474,11 @@ export function AiPanel({
 
   const loopRef = useRef<AgentLoop | null>(null)
   if (!loopRef.current) {
-    // The three slides generation steps (style/planning/per-page HTML) force the high-quality model (only with the anthropic provider;
-    // other providers keep the user setting, avoiding passing nonexistent model names). Chat/fine-tuning still uses the user's configured model.
-    const SLIDES_GEN_MODEL = 'claude-opus-4-7'
-    // Return on demand a settings copy with the generation model overridden (deep copy, doesn't pollute settingsRef).
-    const settingsForGen = (): AiSettings => {
-      const cur = settingsRef.current
-      if (cur.provider !== 'anthropic') return cur
-      const ap = cur.providers.anthropic
-      return {
-        ...cur,
-        providers: { ...cur.providers, anthropic: { ...ap, model: SLIDES_GEN_MODEL } },
-      }
-    }
+    // Generation and chat both use main-owned Genspark config (model preference
+    // from sanitized persisted settings). Renderer cannot select provider/key/baseUrl.
     // Send one LLM request, aggregating streaming deltas into complete text. Shared by in-tool per-page/planning.
     // - On timeout/user stop (signal abort) call aiStreamCancel to cancel the main-process stream, leaving no orphan requests.
-    // - useGenModel=true uses SLIDES_GEN_MODEL first; on request errors (non-timeout) automatically falls back to the
-    //   user-configured model and retries once, so generation isn't wiped out when the key lacks access to that model.
-    // errKind marks failure categories that shouldn't retry with another model (timeout/empty output/user stop)
+    // errKind marks failure categories (timeout/empty output/user stop)
     type LlmResult = {
       ok: boolean
       text?: string
@@ -499,7 +486,6 @@ export function AiPanel({
       errKind?: 'timeout' | 'empty' | 'stopped'
     }
     const runLlmAttempt = (
-      settings: AiSettings,
       system: string,
       user: string,
       timeoutMs: number,
@@ -551,7 +537,6 @@ export function AiPanel({
         window.slidesApi
           .aiStream({
             requestId,
-            settings,
             system,
             messages: [{ role: 'user', text: user }],
             ...(maxTokens ? { maxTokens } : {}),
@@ -569,25 +554,11 @@ export function AiPanel({
       system: string,
       user: string,
       timeoutMs = 150000,
-      useGenModel = true,
+      _useGenModel = true,
       signal?: AbortSignal,
       maxTokens?: number,
     ): Promise<LlmResult> => {
-      const first = await runLlmAttempt(
-        useGenModel ? settingsForGen() : settingsRef.current,
-        system,
-        user,
-        timeoutMs,
-        signal,
-        maxTokens,
-      )
-      if (first.ok || !useGenModel || signal?.aborted) return first
-      // Only "request errors" fall back to the user's model for a retry; timeouts/empty output don't switch models (mostly network/output problems, switching won't help)
-      if (first.errKind) return first
-      const cur = settingsRef.current
-      if (cur.provider !== 'anthropic') return first // The gen-model override only applies with anthropic
-      if (cur.providers.anthropic?.model === SLIDES_GEN_MODEL) return first
-      return runLlmAttempt(cur, system, user, timeoutMs, signal, maxTokens)
+      return runLlmAttempt(system, user, timeoutMs, signal, maxTokens)
     }
 
     const access: DeckAccess = {
@@ -919,7 +890,7 @@ export function AiPanel({
     }
     accessRef.current = access
     loopRef.current = new AgentLoop({
-      transport: createElectronTransport(() => settingsRef.current),
+      transport: createElectronTransport(),
       systemSuffix: aiLangDirective,
       skill: composeSkills('slides+files', '', [
         createSlidesSkill(access),
@@ -1195,7 +1166,7 @@ export function AiPanel({
     const controller = new AbortController()
     qcAbortRef.current = controller
     const capped = pages.slice(0, QC_MAX_PAGES)
-    const transport = createElectronTransport(() => settingsRef.current)
+    const transport = createElectronTransport()
     const header = tGlobal('aiQcStart', { count: capped.length })
     const lines: string[] = []
     const renderEntry = () => [header, ...lines].join('\n')

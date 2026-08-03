@@ -19,8 +19,19 @@ All application windows run with the full Electron renderer lockdown:
   (`@genoffice/electron-utils` → `safeExternalUrl`) that parses the URL and
   enforces a protocol allowlist (http/https; pdf link annotations additionally
   allow mailto). `file:`, `javascript:`, and custom schemes are always rejected.
-- No API keys are hardcoded. AI requests are proxied through the signed-in
-  account by default; user-supplied keys stay in the OS-level settings store.
+- No API keys are hardcoded. AI requests use the signed-in Genspark account
+  (runtime provider is main-owned Genspark only). After migration, GenOffice
+  app `ai-settings.json` stores preference-only data (model choice) — not
+  model-provider API keys or custom base URLs. Legacy plaintext provider keys
+  found in older settings files are moved into an encrypted vault under app
+  `userData` via Electron `safeStorage` when a secure OS backend is available
+  (on Linux, `basic_text` / unknown backends are refused and the source file
+  is left unchanged). The vault is for preservation/recovery only and is not
+  used to re-enable BYOK at runtime.
+- Genspark CLI authentication (`~/.genspark-tool-cli/config.json`, or
+  `GSK_API_KEY`) is owned by the external Genspark CLI. GenOffice reads the
+  key for proxy auth but does not delete, rewrite, or wrap that file in
+  `safeStorage`; that credential boundary remains outside the app vault.
 
 ## Threat Model: AI-Generated Layout Scripts (slides)
 

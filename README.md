@@ -28,7 +28,11 @@ snapshots and diffs in docs, a tool-calling agent over workbook/slide/PDF
 state in the others.
 
 **AI providers.** The apps sign in to a Genspark account and route model
-calls through the Genspark service side; no model API key is stored locally.
+calls through the Genspark service side. GenOffice app settings do not store
+model-provider API keys after migration (legacy keys are vaulted with OS
+`safeStorage` when available). Genspark CLI login material lives in the
+external CLI config (`~/.genspark-tool-cli/config.json`) and is not managed
+by the app vault.
 
 ## Engine packages
 

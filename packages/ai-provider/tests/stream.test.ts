@@ -111,7 +111,8 @@ describe('streamForProvider: anthropic', () => {
   })
 
   it('replaces an HTML error body (e.g. a gateway block page) with a readable note', async () => {
-    const html = '<!doctype html>\n<html>\n<head><title>Genspark</title></head><body>app shell</body></html>'
+    const html =
+      '<!doctype html>\n<html>\n<head><title>Genspark</title></head><body>app shell</body></html>'
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(html, { status: 403 })))
     const { cb } = collector()
     await expect(
@@ -186,9 +187,28 @@ describe('streamForProvider: openai-compatible', () => {
     )
   })
 
-  it('uses the configured base URL for the custom provider', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(okResponse(sseStream(['data: [DONE]'])))
+  it('fail-closes the custom provider without an explicit customFetch, without calling global fetch', async () => {
+    const fetchMock = vi.fn()
     vi.stubGlobal('fetch', fetchMock)
+    const { cb } = collector()
+    await expect(
+      streamForProvider(
+        'custom',
+        { apiKey: 'k', model: 'm', baseUrl: 'https://my-endpoint.example.com/v1' },
+        'sys',
+        [],
+        [],
+        100,
+        cb,
+      ),
+    ).rejects.toThrow(/customFetch/i)
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('routes custom streaming through the supplied customFetch, not global fetch', async () => {
+    const globalFetch = vi.fn()
+    vi.stubGlobal('fetch', globalFetch)
+    const customFetch = vi.fn().mockResolvedValue(okResponse(sseStream(['data: [DONE]'])))
     const { cb } = collector()
     await streamForProvider(
       'custom',
@@ -198,21 +218,24 @@ describe('streamForProvider: openai-compatible', () => {
       [],
       100,
       cb,
+      { customFetch },
     )
-    expect(fetchMock).toHaveBeenCalledWith(
+    expect(globalFetch).not.toHaveBeenCalled()
+    expect(customFetch).toHaveBeenCalledWith(
       'https://my-endpoint.example.com/v1/chat/completions',
       expect.anything(),
     )
   })
 
-  it('rejects the custom provider without a base URL, without ever calling fetch', async () => {
-    const fetchMock = vi.fn()
-    vi.stubGlobal('fetch', fetchMock)
+  it('rejects the custom provider without a base URL even when customFetch is supplied', async () => {
+    const customFetch = vi.fn()
     const { cb } = collector()
     await expect(
-      streamForProvider('custom', { apiKey: 'k', model: 'm' }, 'sys', [], [], 100, cb),
+      streamForProvider('custom', { apiKey: 'k', model: 'm' }, 'sys', [], [], 100, cb, {
+        customFetch,
+      }),
     ).rejects.toThrow(/Base URL/)
-    expect(fetchMock).not.toHaveBeenCalled()
+    expect(customFetch).not.toHaveBeenCalled()
   })
 })
 

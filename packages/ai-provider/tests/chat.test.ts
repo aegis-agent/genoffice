@@ -10,9 +10,21 @@ describe('chatForProvider', () => {
   it('anthropic: extracts joined text content blocks', async () => {
     vi.stubGlobal(
       'fetch',
-      vi.fn().mockResolvedValue(jsonResponse({ content: [{ type: 'text', text: 'hello ' }, { type: 'text', text: 'world' }] })),
+      vi.fn().mockResolvedValue(
+        jsonResponse({
+          content: [
+            { type: 'text', text: 'hello ' },
+            { type: 'text', text: 'world' },
+          ],
+        }),
+      ),
     )
-    const result = await chatForProvider('anthropic', { apiKey: 'k', model: 'claude-sonnet-5' }, 'sys', 'hi')
+    const result = await chatForProvider(
+      'anthropic',
+      { apiKey: 'k', model: 'claude-sonnet-5' },
+      'sys',
+      'hi',
+    )
     expect(result).toEqual({ ok: true, content: 'hello world' })
   })
 
@@ -24,7 +36,8 @@ describe('chatForProvider', () => {
   })
 
   it('anthropic: replaces an HTML error body with a readable note', async () => {
-    const html = '<!doctype html>\n<html>\n<head><title>Genspark</title></head><body>app shell</body></html>'
+    const html =
+      '<!doctype html>\n<html>\n<head><title>Genspark</title></head><body>app shell</body></html>'
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(errorResponse(403, html)))
     const result = await chatForProvider('anthropic', { apiKey: 'k', model: 'm' }, 'sys', 'hi')
     expect(result.ok).toBe(false)
@@ -36,41 +49,81 @@ describe('chatForProvider', () => {
   it('gemini: extracts joined parts text', async () => {
     vi.stubGlobal(
       'fetch',
-      vi.fn().mockResolvedValue(jsonResponse({ candidates: [{ content: { parts: [{ text: 'hi there' }] } }] })),
+      vi
+        .fn()
+        .mockResolvedValue(
+          jsonResponse({ candidates: [{ content: { parts: [{ text: 'hi there' }] } }] }),
+        ),
     )
-    const result = await chatForProvider('gemini', { apiKey: 'k', model: 'gemini-2.5-flash' }, 'sys', 'hi')
+    const result = await chatForProvider(
+      'gemini',
+      { apiKey: 'k', model: 'gemini-2.5-flash' },
+      'sys',
+      'hi',
+    )
     expect(result).toEqual({ ok: true, content: 'hi there' })
   })
 
   it('deepseek and openai hit their fixed base URLs', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ choices: [{ message: { content: 'ok' } }] }))
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(jsonResponse({ choices: [{ message: { content: 'ok' } }] }))
     vi.stubGlobal('fetch', fetchMock)
     await chatForProvider('deepseek', { apiKey: 'k', model: 'deepseek-chat' }, 'sys', 'hi')
-    expect(fetchMock).toHaveBeenCalledWith('https://api.deepseek.com/v1/chat/completions', expect.anything())
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://api.deepseek.com/v1/chat/completions',
+      expect.anything(),
+    )
   })
 
-  it('custom: uses the configured base URL', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ choices: [{ message: { content: 'ok' } }] }))
+  it('custom: fail-closes without an explicit customFetch and never calls global fetch', async () => {
+    const fetchMock = vi.fn()
     vi.stubGlobal('fetch', fetchMock)
-    await chatForProvider(
+    const result = await chatForProvider(
       'custom',
       { apiKey: 'k', model: 'm', baseUrl: 'https://my-endpoint.example.com/v1' },
       'sys',
       'hi',
     )
-    expect(fetchMock).toHaveBeenCalledWith('https://my-endpoint.example.com/v1/chat/completions', expect.anything())
-  })
-
-  it('custom: rejects without a base URL, without calling fetch', async () => {
-    const fetchMock = vi.fn()
-    vi.stubGlobal('fetch', fetchMock)
-    const result = await chatForProvider('custom', { apiKey: 'k', model: 'm' }, 'sys', 'hi')
-    expect(result).toEqual({ ok: false, error: 'A custom provider requires a Base URL' })
+    expect(result.ok).toBe(false)
+    expect(result.error).toMatch(/customFetch/i)
     expect(fetchMock).not.toHaveBeenCalled()
   })
 
+  it('custom: routes through the supplied customFetch, not global fetch', async () => {
+    const globalFetch = vi.fn()
+    vi.stubGlobal('fetch', globalFetch)
+    const customFetch = vi
+      .fn()
+      .mockResolvedValue(jsonResponse({ choices: [{ message: { content: 'ok' } }] }))
+    const result = await chatForProvider(
+      'custom',
+      { apiKey: 'k', model: 'm', baseUrl: 'https://my-endpoint.example.com/v1' },
+      'sys',
+      'hi',
+      { customFetch },
+    )
+    expect(result).toEqual({ ok: true, content: 'ok' })
+    expect(globalFetch).not.toHaveBeenCalled()
+    expect(customFetch).toHaveBeenCalledWith(
+      'https://my-endpoint.example.com/v1/chat/completions',
+      expect.anything(),
+    )
+  })
+
+  it('custom: rejects without a base URL even when customFetch is supplied', async () => {
+    const customFetch = vi.fn()
+    const result = await chatForProvider('custom', { apiKey: 'k', model: 'm' }, 'sys', 'hi', {
+      customFetch,
+    })
+    expect(result).toEqual({ ok: false, error: 'A custom provider requires a Base URL' })
+    expect(customFetch).not.toHaveBeenCalled()
+  })
+
   it('genspark: routes by model prefix to the proxy endpoints', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ content: [{ type: 'text', text: 'ok' }] }))
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(jsonResponse({ content: [{ type: 'text', text: 'ok' }] }))
     vi.stubGlobal('fetch', fetchMock)
     await chatForProvider('genspark', { apiKey: 'gsk-k', model: 'claude-opus-4-7' }, 'sys', 'hi')
     expect(fetchMock).toHaveBeenCalledWith(
@@ -87,7 +140,12 @@ describe('chatForProvider', () => {
 
   it('treats an empty response body as an error', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({ choices: [{ message: {} }] })))
-    const result = await chatForProvider('openai', { apiKey: 'k', model: 'gpt-4.1-mini' }, 'sys', 'hi')
+    const result = await chatForProvider(
+      'openai',
+      { apiKey: 'k', model: 'gpt-4.1-mini' },
+      'sys',
+      'hi',
+    )
     expect(result).toEqual({ ok: false, error: 'AI returned an empty response' })
   })
 })

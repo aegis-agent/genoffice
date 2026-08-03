@@ -19,23 +19,24 @@ export interface IpcStreamChunk {
   error?: string
 }
 
-/** The request forwarded to the main process to start one streaming turn. */
-export interface IpcStreamStart<S> {
+/**
+ * The request forwarded to the main process to start one streaming turn.
+ * Provider configuration is main-owned — never included here.
+ */
+export interface IpcStreamStart {
   requestId: string
-  settings: S
   system: string
   messages: AgentMessage[]
   tools: AgentToolDef[]
 }
 
-export interface IpcTransportOptions<S> {
+export interface IpcTransportOptions {
   /** subscribe to stream chunks; returns the unsubscribe function */
   onStream(listener: (chunk: IpcStreamChunk) => void): () => void
   /** forward the start request to the main process */
-  start(request: IpcStreamStart<S>): void
+  start(request: IpcStreamStart): void
   /** abort the in-flight turn in the main process */
   cancel(requestId: string): void
-  getSettings(): S
   /** localized fallback when an error chunk carries no message */
   unknownErrorText(): string
 }
@@ -44,8 +45,9 @@ export interface IpcTransportOptions<S> {
  * AgentTransport over an Electron IPC bridge: the main process talks to the
  * LLM providers (avoids renderer CORS) and streams chunks back per requestId.
  * Each app wires in its own preload bridge and i18n via the options.
+ * Settings/API keys are resolved in main — the renderer never sends them.
  */
-export function createIpcTransport<S>(options: IpcTransportOptions<S>): AgentTransport {
+export function createIpcTransport(options: IpcTransportOptions): AgentTransport {
   return {
     stream(request: AgentStreamRequest, cb) {
       const requestId = crypto.randomUUID()
@@ -65,7 +67,6 @@ export function createIpcTransport<S>(options: IpcTransportOptions<S>): AgentTra
       })
       options.start({
         requestId,
-        settings: options.getSettings(),
         system: request.system,
         messages: request.messages,
         tools: request.tools,

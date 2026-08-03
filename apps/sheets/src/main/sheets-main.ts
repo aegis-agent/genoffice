@@ -19,6 +19,7 @@ import {
   dialog,
   ipcMain,
   Menu,
+  safeStorage,
   session as electronSession,
   shell,
   WebContentsView,
@@ -32,7 +33,10 @@ import type {
 } from 'electron'
 import { z } from 'zod'
 import {
+  AI_PROVIDER_SECRETS_VAULT_FILENAME,
+  applyAiSettingsPreferencesUpdate,
   installNavigationGuard,
+  loadAiSettingsJson,
   ReadablePathGrantRegistry,
   safeExternalUrl,
 } from '@genoffice/electron-utils'
@@ -42,9 +46,11 @@ import { ProjectStore } from '@genoffice/project-store'
 import {
   chatForProvider,
   defaultAiSettings,
+  publicAiSettings,
   resolveAiSettings,
+  resolveMainOwnedAiConfig,
+  sanitizeRendererAiSettingsUpdate,
   streamForProvider,
-  type AiProviderId,
   type AiSettings,
   type AiStreamChunk,
   type GenSparkAccountStatus,
@@ -74,7 +80,6 @@ import type {
 import {
   ATTACHMENT_IMAGE_EXTS,
   aiChatRequestSchema,
-  aiSettingsInputSchema,
   aiStreamRequestSchema,
   workbookFileSchema,
   workbookFormulaCellsRequestSchema,
@@ -1184,21 +1189,19 @@ function pendingRecoveryFor(filePath: string): string | null {
   }
 }
 
-function readJson<T>(path: string, fallback: T): T {
-  try {
-    if (existsSync(path)) return JSON.parse(readFileSync(path, 'utf-8')) as T
-  } catch {
-    /* corrupted state file: fall back to defaults */
-  }
-  return fallback
-}
-
-function writeJson(path: string, value: unknown): void {
-  mkdirSync(join(path, '..'), { recursive: true })
-  writeFileSync(path, JSON.stringify(value, null, 2))
-}
-
 const SETTINGS_PATH = () => userDataPath('ai-settings.json')
+const AI_SECRETS_VAULT_PATH = () => userDataPath(AI_PROVIDER_SECRETS_VAULT_FILENAME)
+
+/** Migrate legacy plaintext provider secrets (if any), then read preference JSON. */
+function loadStoredAiSettings(): Partial<AiSettings> & LegacyAiSettings {
+  return loadAiSettingsJson({
+    settingsPath: SETTINGS_PATH(),
+    vaultPath: AI_SECRETS_VAULT_PATH(),
+    safeStorage,
+    toPreferenceOnly: (raw) => sanitizeRendererAiSettingsUpdate(raw),
+    log: (msg) => console.info(`[ai-settings] ${msg}`),
+  }) as Partial<AiSettings> & LegacyAiSettings
+}
 
 // Dev-only automation hooks: a fixed CDP port for driving the app from test
 // scripts, and a workbook path that bypasses the native file dialog.
@@ -2027,12 +2030,9 @@ export function registerSheetsAiIpc(): void {
 
   ipcMain.handle(IPC_CHANNELS.aiGetSettings, (event): AiSettings => {
     sessionFor(event)
-    const stored = readJson<Partial<AiSettings> & LegacyAiSettings>(SETTINGS_PATH(), {})
+    const stored = loadStoredAiSettings()
     const settings = resolveAiSettings(stored, defaultAiSettings())
-    // AI features all go through Genspark (gsk login); legacy settings that chose
-    // another provider are reset
-    settings.provider = 'genspark'
-    return settings
+    return publicAiSettings(settings)
   })
 
   // Genspark account (gsk login state): the auth source for AI features; the
@@ -2053,22 +2053,27 @@ export function registerSheetsAiIpc(): void {
 
   ipcMain.handle(IPC_CHANNELS.aiSetSettings, (event, input: unknown) => {
     sessionFor(event)
-    const settings = aiSettingsInputSchema.parse(input)
-    writeJson(SETTINGS_PATH(), settings)
+    // Migrate first; only write preferences when migration is safe so we never
+    // wipe unrecovered plaintext keys (skipped_insecure_storage / failed).
+    return applyAiSettingsPreferencesUpdate({
+      settingsPath: SETTINGS_PATH(),
+      vaultPath: AI_SECRETS_VAULT_PATH(),
+      safeStorage,
+      toPreferenceOnly: (raw) => sanitizeRendererAiSettingsUpdate(raw),
+      preferences: sanitizeRendererAiSettingsUpdate(input),
+      log: (msg) => console.info(`[ai-settings] ${msg}`),
+    })
   })
 
   ipcMain.handle(IPC_CHANNELS.aiChat, async (event, input: unknown) => {
     sessionFor(event)
     const request = aiChatRequestSchema.parse(input)
-    const provider = request.settings.provider as AiProviderId
-    let config = request.settings.providers[provider]
-    if (provider === 'genspark' && config && !config.apiKey) {
-      config = { ...config, apiKey: gskApiKey() }
-    }
-    if (!config?.apiKey) {
+    const stored = loadStoredAiSettings()
+    const { provider, config } = resolveMainOwnedAiConfig(stored, gskApiKey)
+    if (!config.apiKey) {
       return {
         ok: false,
-        error: provider === 'genspark' ? tm('errGskNotLoggedIn') : tm('errNoApiKey', { provider }),
+        error: tm('errGskNotLoggedIn'),
       }
     }
     if (!config.model) return { ok: false, error: tm('errNoModel') }
@@ -2085,21 +2090,16 @@ export function registerSheetsAiIpc(): void {
     const { requestId, system, messages } = request
     const tools = request.tools ?? []
     const maxTokens = request.maxTokens ?? 8192
-    const provider = request.settings.provider as AiProviderId
-    let config = request.settings.providers[provider]
-    // Genspark's key never enters the settings file; it is read from the gsk
-    // login state per request
-    if (provider === 'genspark' && config && !config.apiKey) {
-      config = { ...config, apiKey: gskApiKey() }
-    }
+    const stored = loadStoredAiSettings()
+    const { provider, config } = resolveMainOwnedAiConfig(stored, gskApiKey)
     const send = (chunk: AiStreamChunk) => {
       if (!event.sender.isDestroyed()) event.sender.send(IPC_CHANNELS.aiStreamChunk, chunk)
     }
-    if (!config?.apiKey) {
+    if (!config.apiKey) {
       send({
         requestId,
         type: 'error',
-        error: provider === 'genspark' ? tm('errGskNotLoggedIn') : tm('errNoApiKey', { provider }),
+        error: tm('errGskNotLoggedIn'),
       })
       return
     }
