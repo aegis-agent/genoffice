@@ -892,6 +892,8 @@ export function AiPanel({
     loopRef.current = new AgentLoop({
       transport: createElectronTransport(),
       systemSuffix: aiLangDirective,
+      // Stable per-document chat id → X-Hermes-Session-Id (Hermes gateway continuity).
+      sessionId: () => chatRefIds.current?.chatId,
       skill: composeSkills('slides+files', '', [
         createSlidesSkill(access),
         createFilesSkill(

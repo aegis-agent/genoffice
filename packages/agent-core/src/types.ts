@@ -85,6 +85,8 @@ export interface AgentStreamRequest {
   system: string
   messages: AgentMessage[]
   tools: AgentToolDef[]
+  /** stable conversation id → forwarded as X-Hermes-Session-Id for gateway session continuity */
+  sessionId?: string
 }
 
 export interface AgentStreamCallbacks {

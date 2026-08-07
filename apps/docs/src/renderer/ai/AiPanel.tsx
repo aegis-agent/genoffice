@@ -340,6 +340,9 @@ export function AiPanel({
       transport: createElectronTransport(),
       systemSuffix: aiLangDirective,
       maxTurns: DOCS_AGENT_MAX_TURNS,
+      // Stable per-document session id (project-store chatId).
+      // Sent as X-Hermes-Session-Id → Hermes gateway keeps one session per document.
+      sessionId: () => chatRefIds.current?.chatId,
       skill: composeSkills('docs+files', '', [
         createDocsSkill(
           () => editorRef.current,

@@ -11,7 +11,19 @@ export const GENSPARK_LLM_BASE_URLS = {
   openai: 'https://www.genspark.ai/api/llm_proxy/v1',
 } as const
 
+/** Local Hermes Agent API server (OpenAI-compatible chat/completions). */
+export const HERMES_LLM_BASE_URL = 'http://127.0.0.1:8642/v1'
+
 export const AI_PROVIDERS: AiProviderMeta[] = [
+  {
+    id: 'hermes',
+    label: 'Hermes',
+    models: ['hermes-agent'],
+    defaultModel: 'hermes-agent',
+    keyPlaceholder: 'API key (Hermes gateway API_SERVER_KEY)',
+    needsBaseUrl: true,
+    defaultBaseUrl: HERMES_LLM_BASE_URL,
+  },
   {
     id: 'genspark',
     label: 'Genspark',
@@ -41,7 +53,7 @@ export const AI_PROVIDERS: AiProviderMeta[] = [
       'claude-sonnet-4-5-20250929',
     ],
     defaultModel: 'claude-opus-4-7',
-    keyPlaceholder: 'sk-ant-api03-...',
+    keyPlaceholder: '«redacted:sk-…»...',
   },
   {
     id: 'gemini',
@@ -88,10 +100,10 @@ export function defaultAiSettings(
     providers[meta.id] = {
       apiKey: defaultApiKeys?.[meta.id] ?? '',
       model: meta.defaultModel,
-      baseUrl: meta.needsBaseUrl ? '' : undefined,
+      baseUrl: meta.defaultBaseUrl ?? (meta.needsBaseUrl ? '' : undefined),
     }
   }
-  return { provider: 'genspark', providers }
+  return { provider: 'hermes', providers }
 }
 
 /**

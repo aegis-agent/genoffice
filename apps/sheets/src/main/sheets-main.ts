@@ -70,7 +70,6 @@ import {
 } from '@genoffice/ai-provider'
 import { csvToXlsxBuffer, decodeCsvBuffer } from '../gateway/csv-import'
 import {
-  gskApiKey,
   gskLogin,
   gskLoginInfo,
   hasGskAuth,
@@ -2098,11 +2097,13 @@ export function registerSheetsAiIpc(): void {
   safeHandle(ipcMain, IPC_CHANNELS.aiChat, aiChatArgsSchema, async (event, request) => {
     sessionFor(event as IpcMainInvokeEvent)
     const stored = loadStoredAiSettings()
-    const { provider, config } = resolveMainOwnedAiConfig(stored, gskApiKey)
+    const { provider, config } = resolveMainOwnedAiConfig(stored, () =>
+      (process.env.API_SERVER_KEY ?? process.env.HERMES_API_SERVER_KEY ?? '').trim(),
+    )
     if (!config.apiKey) {
       return {
         ok: false,
-        error: tm('errGskNotLoggedIn'),
+        error: tm('errNoApiKey', { provider }),
       }
     }
     if (!config.model) return { ok: false, error: tm('errNoModel') }
@@ -2120,7 +2121,9 @@ export function registerSheetsAiIpc(): void {
     const tools = request.tools ?? []
     const maxTokens = request.maxTokens ?? 8192
     const stored = loadStoredAiSettings()
-    const { provider, config } = resolveMainOwnedAiConfig(stored, gskApiKey)
+    const { provider, config } = resolveMainOwnedAiConfig(stored, () =>
+      (process.env.API_SERVER_KEY ?? process.env.HERMES_API_SERVER_KEY ?? '').trim(),
+    )
     const send = (chunk: AiStreamChunk) => {
       if (!inv.sender.isDestroyed()) inv.sender.send(IPC_CHANNELS.aiStreamChunk, chunk)
     }
@@ -2128,7 +2131,7 @@ export function registerSheetsAiIpc(): void {
       send({
         requestId,
         type: 'error',
-        error: tm('errGskNotLoggedIn'),
+        error: tm('errNoApiKey', { provider }),
       })
       return
     }
@@ -2139,11 +2142,21 @@ export function registerSheetsAiIpc(): void {
     const controller = new AbortController()
     entry.aiStreams.set(requestId, controller)
     try {
-      await streamForProvider(provider, config, system, messages, tools, maxTokens, {
-        signal: controller.signal,
-        onDelta: (text) => send({ requestId, type: 'delta', text }),
-        onToolCall: (toolCall) => send({ requestId, type: 'tool-call', toolCall }),
-      })
+      await streamForProvider(
+        provider,
+        config,
+        system,
+        messages,
+        tools,
+        maxTokens,
+        {
+          signal: controller.signal,
+          onDelta: (text) => send({ requestId, type: 'delta', text }),
+          onToolCall: (toolCall) => send({ requestId, type: 'tool-call', toolCall }),
+        },
+        undefined,
+        request.sessionId,
+      )
       send({ requestId, type: 'done' })
     } catch (err) {
       if (controller.signal.aborted) {

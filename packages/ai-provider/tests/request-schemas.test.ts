@@ -65,6 +65,29 @@ describe('aiStreamRequestSchema / aiChatRequestSchema', () => {
     expect(asAiChatRequest(parsed)).toEqual({ system: 's', user: 'u' })
   })
 
+  it('accepts a safe sessionId and maps it through asAiStreamRequest', () => {
+    const parsed = aiStreamRequestSchema.parse({
+      ...validStream,
+      sessionId: 'abcdef0123456789',
+    })
+    expect(asAiStreamRequest(parsed).sessionId).toBe('abcdef0123456789')
+  })
+
+  it('rejects unsafe sessionId values at the schema boundary', () => {
+    expect(() =>
+      aiStreamRequestSchema.parse({ ...validStream, sessionId: '' }),
+    ).toThrow()
+    expect(() =>
+      aiStreamRequestSchema.parse({ ...validStream, sessionId: 'bad\r\nid' }),
+    ).toThrow()
+    expect(() =>
+      aiStreamRequestSchema.parse({ ...validStream, sessionId: 'a'.repeat(129) }),
+    ).toThrow()
+    expect(() =>
+      aiStreamRequestSchema.parse({ ...validStream, sessionId: 'has space' }),
+    ).toThrow()
+  })
+
   it('rejects settings / provider / apiKey / baseUrl on stream and chat', () => {
     expect(() =>
       aiStreamRequestSchema.parse({
@@ -171,19 +194,19 @@ describe('aiStreamRequestSchema / aiChatRequestSchema', () => {
 })
 
 describe('aiSettingsPreferencesUpdateSchema', () => {
-  it('accepts preference-only genspark model updates', () => {
+  it('accepts preference-only hermes model updates', () => {
     const parsed = aiSettingsPreferencesUpdateSchema.parse({
-      providers: { genspark: { model: 'claude-sonnet-4-6' } },
+      providers: { hermes: { model: 'hermes-agent' } },
     })
-    expect(parsed.providers.genspark.model).toBe('claude-sonnet-4-6')
+    expect(parsed.providers.hermes.model).toBe('hermes-agent')
   })
 
   it('rejects full public AiSettings shapes with blank keys', () => {
     expect(() =>
       aiSettingsPreferencesUpdateSchema.parse({
-        provider: 'genspark',
+        provider: 'hermes',
         providers: {
-          genspark: { apiKey: '', model: 'claude-opus-4-7', baseUrl: undefined },
+          hermes: { apiKey: '', model: 'hermes-agent', baseUrl: undefined },
           anthropic: { apiKey: '', model: 'x' },
         },
       }),
@@ -194,27 +217,27 @@ describe('aiSettingsPreferencesUpdateSchema', () => {
     expect(() =>
       aiSettingsPreferencesUpdateSchema.parse({
         providers: {
-          genspark: { model: 'claude-opus-4-7', apiKey: 'sk-evil' },
+          hermes: { model: 'hermes-agent', apiKey: 'secret' },
         },
       }),
     ).toThrow()
     expect(() =>
       aiSettingsPreferencesUpdateSchema.parse({
         providers: {
-          genspark: { model: 'claude-opus-4-7', baseUrl: 'https://evil.example' },
+          hermes: { model: 'hermes-agent', baseUrl: 'https://evil.example' },
         },
       }),
     ).toThrow()
     expect(() =>
       aiSettingsPreferencesUpdateSchema.parse({
         provider: 'custom',
-        providers: { genspark: { model: 'claude-opus-4-7' } },
+        providers: { hermes: { model: 'hermes-agent' } },
       }),
     ).toThrow()
     expect(() =>
       aiSettingsPreferencesUpdateSchema.parse({
         providers: {
-          genspark: { model: 'claude-opus-4-7' },
+          hermes: { model: 'hermes-agent' },
           custom: { model: 'x', apiKey: 'k', baseUrl: 'https://evil' },
         },
       }),

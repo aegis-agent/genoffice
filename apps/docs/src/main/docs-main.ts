@@ -65,7 +65,6 @@ import {
   type LegacyAiSettings,
 } from '@genoffice/ai-provider'
 import {
-  gskApiKey,
   gskLogin,
   gskLoginInfo,
   hasGskAuth,
@@ -2362,7 +2361,10 @@ export function registerAiIpc(): void {
     const tools = request.tools ?? []
     const maxTokens = request.maxTokens ?? 8192
     const stored = loadStoredAiSettings()
-    const { provider, config } = resolveMainOwnedAiConfig(stored, gskApiKey)
+    // Hermes API key is main-owned (env). Renderer never supplies provider secrets.
+    const { provider, config } = resolveMainOwnedAiConfig(stored, () =>
+      (process.env.API_SERVER_KEY ?? process.env.HERMES_API_SERVER_KEY ?? '').trim(),
+    )
     const send = (chunk: AiStreamChunk) => {
       const inv = event as IpcMainInvokeEvent
       if (!inv.sender.isDestroyed()) inv.sender.send('ai:stream-chunk', chunk)
@@ -2371,7 +2373,7 @@ export function registerAiIpc(): void {
       send({
         requestId,
         type: 'error',
-        error: tm('errGskNotLoggedIn'),
+        error: tm('errNoApiKey', { provider }),
       })
       return
     }
@@ -2382,11 +2384,21 @@ export function registerAiIpc(): void {
     const controller = new AbortController()
     activeAiStreams.set(requestId, controller)
     try {
-      await streamForProvider(provider, config, system, messages, tools, maxTokens, {
-        signal: controller.signal,
-        onDelta: (text) => send({ requestId, type: 'delta', text }),
-        onToolCall: (toolCall) => send({ requestId, type: 'tool-call', toolCall }),
-      })
+      await streamForProvider(
+        provider,
+        config,
+        system,
+        messages,
+        tools,
+        maxTokens,
+        {
+          signal: controller.signal,
+          onDelta: (text) => send({ requestId, type: 'delta', text }),
+          onToolCall: (toolCall) => send({ requestId, type: 'tool-call', toolCall }),
+        },
+        undefined,
+        request.sessionId,
+      )
       send({ requestId, type: 'done' })
     } catch (err) {
       if (controller.signal.aborted) {
@@ -2448,11 +2460,11 @@ export function registerAiIpc(): void {
   safeHandle(ipcMain, 'ai:chat', aiChatArgsSchema, async (_event, request) => {
     const { system, user } = request
     const stored = loadStoredAiSettings()
-    const { provider, config } = resolveMainOwnedAiConfig(stored, gskApiKey)
+    const { provider, config } = resolveMainOwnedAiConfig(stored, () => (process.env.API_SERVER_KEY ?? process.env.HERMES_API_SERVER_KEY ?? '').trim())
     if (!config.apiKey) {
       return {
         ok: false,
-        error: tm('errGskNotLoggedIn'),
+        error: tm('errNoApiKey', { provider }),
       }
     }
     if (!config.model) return { ok: false, error: tm('errNoModel') }

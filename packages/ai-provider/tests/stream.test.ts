@@ -239,6 +239,104 @@ describe('streamForProvider: openai-compatible', () => {
   })
 })
 
+describe('streamForProvider: hermes session continuity', () => {
+  it('sends X-Hermes-Session-Id when a safe sessionId is provided', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(okResponse(sseStream(['data: [DONE]'])))
+    vi.stubGlobal('fetch', fetchMock)
+    const { cb } = collector()
+    await streamForProvider(
+      'hermes',
+      { apiKey: 'hk', model: 'hermes-agent', baseUrl: 'http://127.0.0.1:8642/v1' },
+      'sys',
+      [],
+      [],
+      100,
+      cb,
+      undefined,
+      'doc-abc123',
+    )
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://127.0.0.1:8642/v1/chat/completions',
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          Authorization: 'Bearer hk',
+          'X-Hermes-Session-Id': 'doc-abc123',
+        }),
+      }),
+    )
+  })
+
+  it('omits X-Hermes-Session-Id when no sessionId is provided', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(okResponse(sseStream(['data: [DONE]'])))
+    vi.stubGlobal('fetch', fetchMock)
+    const { cb } = collector()
+    await streamForProvider(
+      'hermes',
+      { apiKey: 'hk', model: 'hermes-agent', baseUrl: 'http://127.0.0.1:8642/v1' },
+      'sys',
+      [],
+      [],
+      100,
+      cb,
+    )
+    const [, init] = fetchMock.mock.calls[0] as [string, { headers: Record<string, string> }]
+    expect(init.headers['X-Hermes-Session-Id']).toBeUndefined()
+  })
+
+  it('omits X-Hermes-Session-Id for unsafe session values (does not trust Fetch)', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(okResponse(sseStream(['data: [DONE]'])))
+    vi.stubGlobal('fetch', fetchMock)
+    const { cb } = collector()
+    await streamForProvider(
+      'hermes',
+      { apiKey: 'hk', model: 'hermes-agent', baseUrl: 'http://127.0.0.1:8642/v1' },
+      'sys',
+      [],
+      [],
+      100,
+      cb,
+      undefined,
+      'bad\r\nsession',
+    )
+    const [, init] = fetchMock.mock.calls[0] as [string, { headers: Record<string, string> }]
+    expect(init.headers['X-Hermes-Session-Id']).toBeUndefined()
+  })
+
+  it('does not send X-Hermes-Session-Id for non-hermes providers even if sessionId is passed', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(okResponse(sseStream(['data: [DONE]'])))
+    vi.stubGlobal('fetch', fetchMock)
+    const { cb } = collector()
+    await streamForProvider(
+      'openai',
+      { apiKey: 'ok', model: 'gpt-4.1-mini' },
+      'sys',
+      [],
+      [],
+      100,
+      cb,
+      undefined,
+      'doc-abc123',
+    )
+    const [, init] = fetchMock.mock.calls[0] as [string, { headers: Record<string, string> }]
+    expect(init.headers['X-Hermes-Session-Id']).toBeUndefined()
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://api.openai.com/v1/chat/completions',
+      expect.anything(),
+    )
+  })
+
+  it('defaults hermes base URL to the local gateway when unset', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(okResponse(sseStream(['data: [DONE]'])))
+    vi.stubGlobal('fetch', fetchMock)
+    const { cb } = collector()
+    await streamForProvider('hermes', { apiKey: 'hk', model: 'hermes-agent' }, 'sys', [], [], 100, cb)
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://127.0.0.1:8642/v1/chat/completions',
+      expect.anything(),
+    )
+  })
+})
+
 describe('streamForProvider: genspark', () => {
   it('routes claude models to the Anthropic-compatible proxy endpoint', async () => {
     const fetchMock = vi.fn().mockResolvedValue(okResponse(sseStream([])))

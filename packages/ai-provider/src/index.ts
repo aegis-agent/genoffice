@@ -16,6 +16,7 @@ export type { MainOwnedAiConfig } from './main-owned-config'
 export {
   AI_PROVIDERS,
   GENSPARK_LLM_BASE_URLS,
+  HERMES_LLM_BASE_URL,
   defaultAiSettings,
   resolveAiSettings,
 } from './providers'
@@ -27,6 +28,11 @@ export {
 export { chatForProvider } from './chat'
 export { sseLines, streamForProvider } from './stream'
 export type { StreamCallbacks } from './stream'
+export {
+  HERMES_SESSION_ID_HEADER,
+  HERMES_SESSION_ID_MAX,
+  sanitizeHermesSessionId,
+} from './hermes-session'
 export {
   AI_IMAGE_BASE64_MAX,
   AI_IMAGE_MIME_MAX,

@@ -12,18 +12,22 @@ import {
 
 /** transport scripted turn by turn; exposes the callbacks for manual driving */
 function scriptedTransport(script: Array<(cb: AgentStreamCallbacks) => void>): AgentTransport & {
-  requests: Array<{ messageCount: number; toolCount: number }>
+  requests: Array<{ messageCount: number; toolCount: number; sessionId?: string }>
   cancels: number
 } {
   let turn = 0
   const transport = {
-    requests: [] as Array<{ messageCount: number; toolCount: number }>,
+    requests: [] as Array<{ messageCount: number; toolCount: number; sessionId?: string }>,
     cancels: 0,
     lastCallbacks: null as AgentStreamCallbacks | null,
-    stream(request: { messages: AgentMessage[]; tools: unknown[] }, cb: AgentStreamCallbacks) {
+    stream(
+      request: { messages: AgentMessage[]; tools: unknown[]; sessionId?: string },
+      cb: AgentStreamCallbacks,
+    ) {
       transport.requests.push({
         messageCount: request.messages.length,
         toolCount: request.tools.length,
+        ...(request.sessionId ? { sessionId: request.sessionId } : {}),
       })
       transport.lastCallbacks = cb
       const step = script[turn++]
@@ -672,6 +676,52 @@ describe('AgentLoop compaction', () => {
     expect(onError).toHaveBeenCalledWith(expect.stringContaining('retries stopped'))
     expect(onDone).not.toHaveBeenCalled()
     expect(loop.busy).toBe(false)
+  })
+})
+
+describe('AgentLoop session continuity', () => {
+  it('forwards a stable sessionId string onto the transport stream request', async () => {
+    const transport = scriptedTransport([
+      (cb) => {
+        cb.onDelta('ok')
+        cb.onDone()
+      },
+    ])
+    const loop = new AgentLoop({
+      transport,
+      skill: makeSkill(),
+      sessionId: 'chat-stable-1',
+    })
+    loop.run('question')
+    await flush()
+    expect(transport.requests[0]?.sessionId).toBe('chat-stable-1')
+  })
+
+  it('resolves sessionId from a getter each turn and omits when undefined', async () => {
+    let current: string | undefined = 'doc-1'
+    const transport = scriptedTransport([
+      (cb) => {
+        cb.onDelta('a')
+        cb.onDone()
+      },
+      (cb) => {
+        cb.onDelta('b')
+        cb.onDone()
+      },
+    ])
+    const loop = new AgentLoop({
+      transport,
+      skill: makeSkill(),
+      sessionId: () => current,
+    })
+    loop.run('q1')
+    await flush()
+    expect(transport.requests[0]?.sessionId).toBe('doc-1')
+
+    current = undefined
+    loop.run('q2')
+    await flush()
+    expect(transport.requests[1]?.sessionId).toBeUndefined()
   })
 })
 
