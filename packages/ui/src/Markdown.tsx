@@ -2,26 +2,116 @@ import { Fragment, type ReactNode } from 'react'
 
 /**
  * Minimal dependency-free markdown for chat bubbles: paragraphs, ul/ol,
- * headings, **bold**, *italic*, `inline code`. Tolerates
- * partial (streaming) input — anything unrecognized renders as plain text.
+ * headings, **bold**, *italic*, `inline code`, and `[label](url)` links.
+ * Tolerates partial (streaming) input — anything unrecognized renders as plain text.
+ *
+ * Link safety: only absolute http:/https: URLs become anchors. javascript:,
+ * file:, data:, relative paths, mailto:, etc. stay inert text. Anchors always
+ * use target=_blank and rel=noopener noreferrer. No dangerouslySetInnerHTML.
  */
 
-const INLINE_RE = /(`[^`\n]+`|\*\*[^*\n]+?\*\*|\*[^*\n]+?\*)/g
+/** Returns href when it is a well-formed absolute http(s) URL; otherwise null. */
+export function safeMarkdownHref(href: string): string | null {
+  if (typeof href !== 'string') return null
+  const trimmed = href.trim()
+  if (!trimmed || /\s/.test(trimmed)) return null
+  let parsed: URL
+  try {
+    parsed = new URL(trimmed)
+  } catch {
+    return null
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null
+  // new URL('//host/path') resolves against a base in browsers but throws in
+  // Node without a base — still reject protocol-relative if it ever parses.
+  if (trimmed.startsWith('//')) return null
+  return trimmed
+}
 
 function renderInline(text: string): ReactNode[] {
   const out: ReactNode[] = []
-  let last = 0
+  let i = 0
   let key = 0
-  for (const m of text.matchAll(INLINE_RE)) {
-    const i = m.index ?? 0
-    if (i > last) out.push(text.slice(last, i))
-    const tok = m[0] ?? ''
-    if (tok.startsWith('`')) out.push(<code key={key++}>{tok.slice(1, -1)}</code>)
-    else if (tok.startsWith('**')) out.push(<strong key={key++}>{tok.slice(2, -2)}</strong>)
-    else out.push(<em key={key++}>{tok.slice(1, -1)}</em>)
-    last = i + tok.length
+
+  const pushText = (s: string): void => {
+    if (s) out.push(s)
   }
-  if (last < text.length) out.push(text.slice(last))
+
+  while (i < text.length) {
+    const ch = text[i]
+
+    // `inline code`
+    if (ch === '`') {
+      const end = text.indexOf('`', i + 1)
+      if (end !== -1 && !text.slice(i + 1, end).includes('\n')) {
+        out.push(<code key={key++}>{text.slice(i + 1, end)}</code>)
+        i = end + 1
+        continue
+      }
+    }
+
+    // [label](url) — only complete tokens; partial streaming stays text
+    if (ch === '[') {
+      const closeLabel = text.indexOf(']', i + 1)
+      if (
+        closeLabel !== -1 &&
+        text[closeLabel + 1] === '(' &&
+        !text.slice(i + 1, closeLabel).includes('\n')
+      ) {
+        const closeUrl = text.indexOf(')', closeLabel + 2)
+        if (closeUrl !== -1 && !text.slice(closeLabel + 2, closeUrl).includes('\n')) {
+          const label = text.slice(i + 1, closeLabel)
+          const url = text.slice(closeLabel + 2, closeUrl)
+          if (!/\s/.test(url)) {
+            const href = safeMarkdownHref(url)
+            if (href) {
+              out.push(
+                <a key={key++} href={href} target="_blank" rel="noopener noreferrer">
+                  {renderInline(label)}
+                </a>,
+              )
+            } else {
+              // Inert: keep the raw markdown text so users can still read it.
+              pushText(text.slice(i, closeUrl + 1))
+            }
+            i = closeUrl + 1
+            continue
+          }
+        }
+      }
+    }
+
+    // **bold**
+    if (ch === '*' && text[i + 1] === '*') {
+      const end = text.indexOf('**', i + 2)
+      if (end !== -1 && !text.slice(i + 2, end).includes('\n')) {
+        out.push(<strong key={key++}>{renderInline(text.slice(i + 2, end))}</strong>)
+        i = end + 2
+        continue
+      }
+    }
+
+    // *italic*
+    if (ch === '*') {
+      const end = text.indexOf('*', i + 1)
+      if (end !== -1 && !text.slice(i + 1, end).includes('\n')) {
+        out.push(<em key={key++}>{renderInline(text.slice(i + 1, end))}</em>)
+        i = end + 1
+        continue
+      }
+    }
+
+    // plain run until next special char
+    let j = i + 1
+    while (j < text.length) {
+      const c = text[j]
+      if (c === '`' || c === '[' || c === '*') break
+      j++
+    }
+    pushText(text.slice(i, j))
+    i = j
+  }
+
   return out
 }
 

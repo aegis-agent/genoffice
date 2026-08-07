@@ -1326,7 +1326,13 @@ export async function createSheetsWindow(
   if (options.includeAiHandlers ?? true) registerSheetsAiIpc()
   if (options.includeAiHandlers ?? true) registerProjectIpc()
   registerSheetsSession(window.webContents, client)
-  window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
+  // AI chat markdown links use target=_blank → window.open; route allowlisted
+  // http(s) to the OS browser and never spawn an in-app window with remote content.
+  window.webContents.setWindowOpenHandler(({ url }) => {
+    const target = safeExternalUrl(url)
+    if (target) void shell.openExternal(target)
+    return { action: 'deny' }
+  })
   window.webContents.on('will-navigate', (event) => event.preventDefault())
   if (!app.isPackaged) {
     window.webContents.on('console-message', (details) => {
@@ -1372,7 +1378,11 @@ export function createSheetsView(options: { includeAiHandlers?: boolean } = {}):
   registerSheetsIpc()
   if (options.includeAiHandlers ?? true) registerSheetsAiIpc()
   registerSheetsSession(view.webContents, client)
-  view.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
+  view.webContents.setWindowOpenHandler(({ url }) => {
+    const target = safeExternalUrl(url)
+    if (target) void shell.openExternal(target)
+    return { action: 'deny' }
+  })
   view.webContents.on('will-navigate', (event) => event.preventDefault())
   if (!app.isPackaged) {
     view.webContents.on('console-message', (details) => {
