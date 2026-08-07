@@ -759,4 +759,39 @@ describe('composeSkills', () => {
     })
     expect(() => composeSkills('x', '', [make('a'), make('b')])).toThrow(/duplicate/)
   })
+
+  it('snapshots systemPrompt and tools so later child getter/backing changes cannot drift', () => {
+    let prompt = 'P0'
+    let tools: AgentSkill['tools'] = [{ name: 't0', description: '', inputSchema: {} }]
+    const live: AgentSkill = {
+      id: 'live',
+      get systemPrompt() {
+        return prompt
+      },
+      get tools() {
+        return tools
+      },
+      buildContext: () => 'CTX_LIVE',
+      executeTool: () => ({ output: 'live', summary: 'live' }),
+    }
+    const staticSkill: AgentSkill = {
+      id: 'static',
+      systemPrompt: 'STATIC',
+      tools: [{ name: 't_static', description: '', inputSchema: {} }],
+      buildContext: () => 'CTX_STATIC',
+      executeTool: () => ({ output: 'static', summary: 'static' }),
+    }
+
+    const merged = composeSkills('m', 'INTRO', [live, staticSkill])
+    expect(merged.systemPrompt).toBe('INTRO\n\nP0\n\nSTATIC')
+    expect(merged.tools.map((t) => t.name)).toEqual(['t0', 't_static'])
+
+    // Mutate backing state / getters after compose — composed skill must not drift.
+    prompt = 'P_DRIFT'
+    tools = [{ name: 't_drift', description: 'drift', inputSchema: {} }]
+    expect(merged.systemPrompt).toBe('INTRO\n\nP0\n\nSTATIC')
+    expect(merged.tools.map((t) => t.name)).toEqual(['t0', 't_static'])
+    // buildContext remains live (per-turn document state is intentional).
+    expect(merged.buildContext?.()).toBe('CTX_LIVE\n\nCTX_STATIC')
+  })
 })

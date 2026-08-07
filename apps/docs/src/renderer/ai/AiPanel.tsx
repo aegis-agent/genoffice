@@ -11,8 +11,8 @@ import { applyRevisionsBy } from '../editor/revisions'
 import { DOCS_AGENT_MAX_TURNS, DOCS_CONTINUE_INSTRUCTION } from './continuation'
 import { createFilesSkill } from './files-skill'
 import {
+  composeDocsPanelSkills,
   createHermesArtifactPatchSkill,
-  createLiveDocsPanelSkill,
 } from './hermes-artifact-context'
 import { createElectronTransport } from './transport'
 import { useI18n, t as tModule, aiLangDirective, type StringKey } from '../i18n/locale'
@@ -349,8 +349,10 @@ export function AiPanel({
       // Stable per-document session id (project-store chatId).
       // Sent as X-Hermes-Session-Id → Hermes gateway keeps one session per document.
       sessionId: () => chatRefIds.current?.chatId,
-      skill: createLiveDocsPanelSkill({
-        getProvider: () => settingsRef.current.provider,
+      // Compose once at AgentLoop construction (immutable prompt/tools snapshot).
+      // Only hermes saved-path buildContext stays live per turn via getFilePath.
+      skill: composeDocsPanelSkills({
+        provider: settingsRef.current.provider,
         docsSkill: createDocsSkill(
           () => editorRef.current,
           numIds,

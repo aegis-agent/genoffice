@@ -26,6 +26,10 @@ export interface AgentSkill {
 /**
  * Merge several skills into one (tool names must be globally unique).
  * `intro` becomes the shared preamble of the combined system prompt.
+ *
+ * systemPrompt and tools are snapshotted at compose time so mid-session
+ * child getter/backing-state changes cannot drift the AgentLoop skill.
+ * buildContext stays live (per-turn document/attachment state).
  */
 export function composeSkills(id: string, intro: string, skills: AgentSkill[]): AgentSkill {
   const owner = new Map<string, AgentSkill>()
@@ -35,16 +39,13 @@ export function composeSkills(id: string, intro: string, skills: AgentSkill[]): 
       owner.set(tool.name, skill)
     }
   }
+  // Snapshot prompt + tool defs at compose time (immutable composition).
+  const systemPrompt = [intro, ...skills.map((s) => s.systemPrompt)].filter(Boolean).join('\n\n')
+  const tools = skills.flatMap((s) => s.tools)
   return {
     id,
-    // Live getters so conditional skills (e.g. Hermes-only context) can
-    // enable/disable systemPrompt without recomposing the AgentLoop skill.
-    get systemPrompt() {
-      return [intro, ...skills.map((s) => s.systemPrompt)].filter(Boolean).join('\n\n')
-    },
-    get tools() {
-      return skills.flatMap((s) => s.tools)
-    },
+    systemPrompt,
+    tools,
     buildContext: () =>
       skills
         .map((s) => s.buildContext?.() ?? '')
