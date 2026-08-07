@@ -81,8 +81,8 @@ export function isAcceptableHermesSavedDocxPath(filePath: string): boolean {
   if (/^[A-Za-z]:[\\/]/.test(filePath)) return true
 
   // UNC: \\server\share\... or //server/share/...
-  if (/^\\\\[^\\\/]+[\\/]/.test(filePath)) return true
-  if (/^\/\/[^\\\/]+[\\/]/.test(filePath)) return true
+  if (/^\\\\[^/\\]+[\\/]/.test(filePath)) return true
+  if (/^\/\/[^/\\]+[\\/]/.test(filePath)) return true
 
   return false
 }

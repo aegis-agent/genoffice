@@ -73,15 +73,9 @@ describe('createIpcTransport', () => {
   })
 
   it('forwards sessionId on start when present on the agent stream request', () => {
-    let listener: ((chunk: IpcStreamChunk) => void) | undefined
     const started: IpcStreamStart[] = []
     const transport = createIpcTransport({
-      onStream: (l) => {
-        listener = l
-        return () => {
-          listener = undefined
-        }
-      },
+      onStream: () => () => undefined,
       start: (request) => started.push(request),
       cancel: () => undefined,
       unknownErrorText: () => 'unknown error',
