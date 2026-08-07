@@ -119,6 +119,7 @@ export async function pdfToText(bytes: Uint8Array): Promise<string> {
     }
     return pages.join('\n\n')
   } finally {
-    await doc.destroy()
+    // PDF.js 6 removed PDFDocumentProxy.destroy(); release via the loading task.
+    await doc.loadingTask.destroy()
   }
 }
