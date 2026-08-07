@@ -350,9 +350,10 @@ export function AiPanel({
       // Sent as X-Hermes-Session-Id → Hermes gateway keeps one session per document.
       sessionId: () => chatRefIds.current?.chatId,
       // Compose once at AgentLoop construction (immutable prompt/tools snapshot).
-      // Only hermes saved-path buildContext stays live per turn via getFilePath.
+      // Hermes (default/fail-closed): empty tools; only buildContext stays live.
+      // Explicit non-Hermes retains local docs/files tools for a future thaw.
       skill: composeDocsPanelSkills({
-        provider: settingsRef.current.provider,
+        provider: settingsRef.current?.provider,
         docsSkill: createDocsSkill(
           () => editorRef.current,
           numIds,

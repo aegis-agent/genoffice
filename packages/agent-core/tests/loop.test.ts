@@ -2,6 +2,8 @@ import { describe, expect, it, vi } from 'vitest'
 import {
   AgentLoop,
   composeSkills,
+  createNativeHermesReadOnlySkill,
+  resolveNativeHermesAgentMode,
   type AgentMessage,
   type AgentSkill,
   type AgentStreamCallbacks,
@@ -793,5 +795,83 @@ describe('composeSkills', () => {
     expect(merged.tools.map((t) => t.name)).toEqual(['t0', 't_static'])
     // buildContext remains live (per-turn document state is intentional).
     expect(merged.buildContext?.()).toBe('CTX_LIVE\n\nCTX_STATIC')
+  })
+})
+
+describe('createNativeHermesReadOnlySkill', () => {
+  it('snapshots prompt, exposes empty tools, includes context sources, rejects every tool call', async () => {
+    let ctxA = 'A1'
+    let ctxB = 'B1'
+    const sourceWithTools: AgentSkill = {
+      id: 'mutator',
+      systemPrompt: 'SOURCE_PROMPT_MUST_NOT_LEAK',
+      tools: [{ name: 'replace_blocks', description: 'mutates', inputSchema: {} }],
+      buildContext: () => ctxA,
+      executeTool: () => ({ output: 'MUTATED', summary: 'mutated', mutated: true }),
+    }
+    const skill = createNativeHermesReadOnlySkill({
+      id: 'hermes-ro',
+      systemPrompt: 'HERMES_ONLY_PROMPT',
+      contextSources: [sourceWithTools, () => ctxB, { buildContext: () => 'C_STATIC' }],
+    })
+
+    expect(skill.id).toBe('hermes-ro')
+    expect(skill.systemPrompt).toBe('HERMES_ONLY_PROMPT')
+    expect(skill.systemPrompt).not.toContain('SOURCE_PROMPT_MUST_NOT_LEAK')
+    expect(skill.tools).toEqual([])
+    expect(Object.isFrozen(skill.tools)).toBe(true)
+    expect(skill.buildContext?.()).toBe('A1\n\nB1\n\nC_STATIC')
+
+    ctxA = 'A2'
+    ctxB = 'B2'
+    expect(skill.buildContext?.()).toBe('A2\n\nB2\n\nC_STATIC')
+
+    const rejected = await skill.executeTool({
+      id: 'tc1',
+      name: 'replace_blocks',
+      input: { evil: true },
+    })
+    expect(rejected.isError).toBe(true)
+    expect(rejected.mutated).toBeFalsy()
+    expect(rejected.output).toMatch(/unknown tool|no client tools/i)
+    expect(rejected.output).not.toBe('MUTATED')
+  })
+
+  it('does not route synthetic tool_calls to source executors', async () => {
+    let sourceReached = false
+    const source: AgentSkill = {
+      id: 'docs',
+      systemPrompt: 'DOCS',
+      tools: [{ name: 'insert_content', description: '', inputSchema: {} }],
+      buildContext: () => 'DOC_CTX',
+      executeTool: () => {
+        sourceReached = true
+        return { output: 'executed', summary: 'insert_content', mutated: true }
+      },
+    }
+    const skill = createNativeHermesReadOnlySkill({
+      id: 'docs-hermes',
+      systemPrompt: 'RO',
+      contextSources: [source],
+    })
+    const result = await skill.executeTool({ id: '1', name: 'insert_content', input: {} })
+    expect(sourceReached).toBe(false)
+    expect(result.isError).toBe(true)
+    expect(result.mutated).toBeFalsy()
+  })
+})
+
+describe('resolveNativeHermesAgentMode', () => {
+  it('fail-closes to hermes for null/undefined/empty and hermes id', () => {
+    expect(resolveNativeHermesAgentMode(null)).toBe('hermes')
+    expect(resolveNativeHermesAgentMode(undefined)).toBe('hermes')
+    expect(resolveNativeHermesAgentMode('')).toBe('hermes')
+    expect(resolveNativeHermesAgentMode('hermes')).toBe('hermes')
+  })
+
+  it('returns local-tools only for an explicit non-hermes provider', () => {
+    expect(resolveNativeHermesAgentMode('anthropic')).toBe('local-tools')
+    expect(resolveNativeHermesAgentMode('openai')).toBe('local-tools')
+    expect(resolveNativeHermesAgentMode('genspark')).toBe('local-tools')
   })
 })

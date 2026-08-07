@@ -8,6 +8,7 @@ import {
   buildHermesSavedDocxPathContext,
   composeDocsPanelSkills,
   createHermesArtifactPatchSkill,
+  resolveNativeHermesAgentMode,
 } from '../src/renderer/ai/hermes-artifact-context'
 
 function stubSkill(id: string, tools: string[] = []): AgentSkill {
@@ -16,7 +17,7 @@ function stubSkill(id: string, tools: string[] = []): AgentSkill {
     systemPrompt: `PROMPT_${id}`,
     tools: tools.map((name) => ({ name, description: '', inputSchema: {} })),
     buildContext: () => `CTX_${id}`,
-    executeTool: () => ({ output: id, summary: id }),
+    executeTool: () => ({ output: id, summary: id, mutated: true }),
   }
 }
 
@@ -158,24 +159,61 @@ describe('saved path encoding and bounds', () => {
 })
 
 describe('Hermes-only static composition', () => {
-  it('includes Hermes artifact context only when provider is hermes at compose time', () => {
-    const docs = stubSkill('docs', ['replace_text'])
+  it('uses Artifact Patch prompt, empty tools, and read-only context under hermes (fail-closed)', async () => {
+    let docsReached = false
+    const docs: AgentSkill = {
+      id: 'docs',
+      systemPrompt: 'PROMPT_docs',
+      tools: [
+        { name: 'replace_blocks', description: '', inputSchema: {} },
+        { name: 'insert_content', description: '', inputSchema: {} },
+      ],
+      buildContext: () => 'CTX_docs',
+      executeTool: () => {
+        docsReached = true
+        return { output: 'docs-executed', summary: 'docs', mutated: true }
+      },
+    }
     const files = stubSkill('files', ['read_attachment'])
     const hermes = createHermesArtifactPatchSkill({
       getFilePath: () => '/tmp/saved.docx',
     })
 
-    const forHermes = composeDocsPanelSkills({
-      provider: 'hermes',
-      docsSkill: docs,
-      filesSkill: files,
-      hermesSkill: hermes,
+    for (const provider of ['hermes', null, undefined, ''] as const) {
+      const forHermes = composeDocsPanelSkills({
+        provider,
+        docsSkill: docs,
+        filesSkill: files,
+        hermesSkill: hermes,
+      })
+      expect(resolveNativeHermesAgentMode(provider)).toBe('hermes')
+      expect(forHermes.systemPrompt).toBe(buildHermesArtifactPatchSystemPrompt())
+      expect(forHermes.systemPrompt).not.toContain('PROMPT_docs')
+      expect(forHermes.systemPrompt).not.toContain('PROMPT_files')
+      expect(forHermes.tools).toEqual([])
+      expect(forHermes.buildContext?.()).toContain('CTX_docs')
+      expect(forHermes.buildContext?.()).toContain('CTX_files')
+      expect(forHermes.buildContext?.()).toContain(JSON.stringify('/tmp/saved.docx'))
+
+      const rejected = await forHermes.executeTool({
+        id: '1',
+        name: 'replace_blocks',
+        input: {},
+      })
+      expect(docsReached).toBe(false)
+      expect(rejected.isError).toBe(true)
+      expect(rejected.mutated).toBeFalsy()
+      expect(rejected.output).toMatch(/unknown tool|no client tools/i)
+      expect(rejected.output).not.toBe('docs-executed')
+    }
+  })
+
+  it('retains local docs/files tools only for explicit non-hermes providers', () => {
+    const docs = stubSkill('docs', ['replace_text'])
+    const files = stubSkill('files', ['read_attachment'])
+    const hermes = createHermesArtifactPatchSkill({
+      getFilePath: () => '/tmp/saved.docx',
     })
-    expect(forHermes.systemPrompt).toContain('PROMPT_docs')
-    expect(forHermes.systemPrompt).toContain('PROMPT_files')
-    expect(forHermes.systemPrompt).toContain(buildHermesArtifactPatchSystemPrompt())
-    expect(forHermes.buildContext?.()).toContain(JSON.stringify('/tmp/saved.docx'))
-    expect(forHermes.tools.map((t) => t.name)).toEqual(['replace_text', 'read_attachment'])
 
     const forOther = composeDocsPanelSkills({
       provider: 'anthropic',
@@ -209,7 +247,8 @@ describe('Hermes-only static composition', () => {
     })
     const promptAtCompose = merged.systemPrompt
     const toolsAtCompose = merged.tools.map((t) => t.name)
-    expect(promptAtCompose).toContain('Artifact Patch')
+    expect(promptAtCompose).toBe(buildHermesArtifactPatchSystemPrompt())
+    expect(toolsAtCompose).toEqual([])
     expect(merged.buildContext?.()).toContain(JSON.stringify('/tmp/first.docx'))
 
     filePath = '/tmp/second.docx'

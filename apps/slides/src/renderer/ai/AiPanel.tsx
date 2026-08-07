@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react'
-import { AgentLoop, composeSkills, type AgentImage, type ToolDisplay } from '@genoffice/agent-core'
+import { AgentLoop, type AgentImage, type ToolDisplay } from '@genoffice/agent-core'
 import type { RenderSlide } from '@genoffice/pptx-render'
 import type { AiSettings, AttachmentAddResult, AttachmentMeta } from '../../shared/ipc'
 import { ATTACHMENT_IMAGE_EXTS } from '../../shared/ipc'
@@ -12,6 +12,7 @@ import {
 } from './slides-skill'
 import { extractJsonObject, parseOutlineJson } from './outline-json'
 import { createFilesSkill } from './files-skill'
+import { composeSlidesPanelSkills } from './hermes-readonly'
 import { createElectronTransport } from './transport'
 import { renderSlidesToPngBase64 } from '../export-render'
 import { isQcEnabled, mergeQcPages, qcSlidePage, QC_MAX_PAGES } from './slide-qc'
@@ -894,13 +895,15 @@ export function AiPanel({
       systemSuffix: aiLangDirective,
       // Stable per-document chat id → X-Hermes-Session-Id (Hermes gateway continuity).
       sessionId: () => chatRefIds.current?.chatId,
-      skill: composeSkills('slides+files', '', [
-        createSlidesSkill(access),
-        createFilesSkill(
+      // Fail-closed Hermes when provider is hermes/unknown at first mount.
+      skill: composeSlidesPanelSkills({
+        provider: settingsRef.current.provider,
+        slidesSkill: createSlidesSkill(access),
+        filesSkill: createFilesSkill(
           () => attachmentsRef.current,
           (path) => readAttachmentPathsRef.current.add(path),
         ),
-      ]),
+      }),
       // Page-by-page deck generation needs more tool rounds
       maxTurns: 24,
       events: {

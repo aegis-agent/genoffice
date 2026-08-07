@@ -335,6 +335,70 @@ describe('streamForProvider: hermes session continuity', () => {
       expect.anything(),
     )
   })
+
+  it('strips tools and never serializes tools/tool_choice for hermes even when caller supplies mutation tools', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(okResponse(sseStream(['data: [DONE]'])))
+    vi.stubGlobal('fetch', fetchMock)
+    const { cb } = collector()
+    const mutationTools = [
+      {
+        name: 'replace_blocks',
+        description: 'mutate live doc',
+        inputSchema: { type: 'object', properties: {} },
+      },
+      {
+        name: 'propose_operations',
+        description: 'mutate workbook',
+        inputSchema: { type: 'object', properties: {} },
+      },
+    ]
+    await streamForProvider(
+      'hermes',
+      { apiKey: 'hk', model: 'hermes-agent', baseUrl: 'http://127.0.0.1:8642/v1' },
+      'sys',
+      [{ role: 'user', text: 'edit it' }],
+      mutationTools,
+      100,
+      cb,
+      undefined,
+      'doc-1',
+    )
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    const [, init] = fetchMock.mock.calls[0] as [string, { body: string }]
+    const body = JSON.parse(init.body) as Record<string, unknown>
+    expect(body).not.toHaveProperty('tools')
+    expect(body).not.toHaveProperty('tool_choice')
+    expect(JSON.stringify(body)).not.toMatch(/replace_blocks|propose_operations/)
+  })
+
+  it('still serializes tools for non-hermes openai-compatible providers when supplied', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(okResponse(sseStream(['data: [DONE]'])))
+    vi.stubGlobal('fetch', fetchMock)
+    const { cb } = collector()
+    await streamForProvider(
+      'openai',
+      { apiKey: 'sk', model: 'gpt-4.1-mini' },
+      'sys',
+      [],
+      [
+        {
+          name: 'replace_blocks',
+          description: 'ok for non-hermes',
+          inputSchema: { type: 'object', properties: {} },
+        },
+      ],
+      100,
+      cb,
+    )
+    const [, init] = fetchMock.mock.calls[0] as [string, { body: string }]
+    const body = JSON.parse(init.body) as { tools?: Array<{ function?: { name?: string } }> }
+    expect(body.tools).toEqual([
+      expect.objectContaining({
+        type: 'function',
+        function: expect.objectContaining({ name: 'replace_blocks' }),
+      }),
+    ])
+  })
 })
 
 describe('streamForProvider: genspark', () => {

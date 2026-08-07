@@ -468,12 +468,14 @@ export async function streamForProvider(
     case 'hermes':
       // Native Hermes: local gateway (OpenAI-compatible) runs the full agent.
       // Session header is Hermes-only — never attached to other providers.
+      // Defense in depth: never forward client tool schemas (or tool_choice).
+      // Hermes agent discovers its own tools; renderer mutation tools must not bridge.
       return streamOpenAiCompatible(
         config.baseUrl || HERMES_LLM_BASE_URL,
         config,
         system,
         messages,
-        tools,
+        [],
         maxTokens,
         cb,
         fetch,

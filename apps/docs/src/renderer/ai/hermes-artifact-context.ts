@@ -1,4 +1,9 @@
-import { composeSkills, type AgentSkill } from '@genoffice/agent-core'
+import {
+  composeSkills,
+  createNativeHermesReadOnlySkill,
+  resolveNativeHermesAgentMode,
+  type AgentSkill,
+} from '@genoffice/agent-core'
 
 /** Max chars accepted for a saved DOCX path in Hermes context (reject overlong). */
 export const HERMES_SAVED_DOCX_PATH_MAX_CHARS = 4096
@@ -134,32 +139,34 @@ export interface HermesArtifactPatchSkillOptions {
 export function createHermesArtifactPatchSkill(
   options: HermesArtifactPatchSkillOptions,
 ): AgentSkill {
-  return {
+  return createNativeHermesReadOnlySkill({
     id: 'hermes-artifact-patch',
     systemPrompt: HERMES_ARTIFACT_PATCH_SYSTEM_PROMPT,
-    tools: [],
-    buildContext: () => buildHermesSavedDocxPathContext(options.getFilePath()),
-    executeTool: (call) => ({
-      output: `Unknown tool: ${call.name}. This skill exposes no client tools.`,
-      isError: true,
-      summary: call.name,
-    }),
-  }
+    contextSources: [() => buildHermesSavedDocxPathContext(options.getFilePath())],
+  })
 }
 
+export { resolveNativeHermesAgentMode }
+
 /**
- * Docs AI panel skill composition: existing docs+files always; Hermes artifact
- * context only when provider === 'hermes' at compose time (immutable snapshot).
+ * Docs AI panel skill composition.
+ * Hermes (default / fail-closed): Artifact Patch system prompt only, read-only
+ * Docs/files/saved-path context, empty tools, no local executors.
+ * Explicit non-Hermes: retain docs+files local tools for a future thaw.
  */
 export function composeDocsPanelSkills(options: {
-  provider: string
+  provider: string | null | undefined
   docsSkill: AgentSkill
   filesSkill: AgentSkill
   hermesSkill: AgentSkill
 }): AgentSkill {
-  const skills: AgentSkill[] = [options.docsSkill, options.filesSkill]
-  if (options.provider === 'hermes') {
-    skills.push(options.hermesSkill)
+  const mode = resolveNativeHermesAgentMode(options.provider)
+  if (mode === 'hermes') {
+    return createNativeHermesReadOnlySkill({
+      id: 'docs-hermes',
+      systemPrompt: HERMES_ARTIFACT_PATCH_SYSTEM_PROMPT,
+      contextSources: [options.docsSkill, options.filesSkill, options.hermesSkill],
+    })
   }
-  return composeSkills('docs+files', '', skills)
+  return composeSkills('docs+files', '', [options.docsSkill, options.filesSkill])
 }

@@ -97,7 +97,7 @@ import '@univerjs/preset-sheets-table/lib/index.css'
 import { greenTheme } from '@univerjs/themes'
 import { createUniver } from './create-univer'
 
-import { AgentLoop, composeSkills, type AgentImage } from '@genoffice/agent-core'
+import { AgentLoop, type AgentImage } from '@genoffice/agent-core'
 import type { AiSettings } from '@genoffice/ai-provider'
 import { type WorkbookOperation } from '../domain/workbook-dsl'
 import { columnIndex, columnLabel, parseAddress, parseRange } from '../domain/cell-address'
@@ -117,6 +117,7 @@ import type { AiChatMessage } from './ai/AiChatPanel'
 import { createWorkbookSkill } from './ai/workbook-skill'
 import { createFilesSkill } from './ai/files-skill'
 import { createSearchSkill } from './ai/search-skill'
+import { composeSheetsPanelSkills, isSheetsAgentConfigured } from './ai/hermes-readonly'
 import { ATTACHMENT_IMAGE_EXTS } from '../shared/desktop-api'
 import type {
   AttachmentAddResult,
@@ -751,11 +752,13 @@ export function App(): React.JSX.Element {
       systemSuffix: aiLangDirective,
       // Stable per-workbook chat id → X-Hermes-Session-Id (Hermes gateway continuity).
       sessionId: () => chatRefIdsRef.current?.chatId,
-      skill: composeSkills('sheets+files', '', [
-        createWorkbookSkill(sheetsSkillDeps()),
-        createFilesSkill(() => attachmentsRef.current),
-        createSearchSkill(),
-      ]),
+      // Fail-closed Hermes when settings are null/stale at first mount (async hydration).
+      skill: composeSheetsPanelSkills({
+        provider: aiSettingsRef.current?.provider,
+        workbookSkill: createWorkbookSkill(sheetsSkillDeps()),
+        filesSkill: createFilesSkill(() => attachmentsRef.current),
+        searchSkill: createSearchSkill(),
+      }),
       // guide loading adds a tool round; the default 8 cuts off multi-step work
       maxTurns: 24,
       events: {
@@ -878,14 +881,8 @@ export function App(): React.JSX.Element {
   }
 
   function isAgentConfigured(): boolean {
-    const settings = aiSettingsRef.current
-    if (!settings) return false
-    const config = settings.providers[settings.provider]
-    if (!config?.model) return false
-    // Genspark's key never lands in the settings file; the main process injects
-    // it from the gsk login state. When logged out, requests return an error
-    // guiding sign-in — not intercepted here.
-    return settings.provider === 'genspark' || !!config.apiKey
+    // Hermes/Genspark keys are main-owned; public settings redact apiKey.
+    return isSheetsAgentConfigured(aiSettingsRef.current)
   }
 
   /** Image attachments read as base64 and sent multimodal with this user message
