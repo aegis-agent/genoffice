@@ -10,10 +10,7 @@ import { createDocsSkill } from './docs-skill'
 import { applyRevisionsBy } from '../editor/revisions'
 import { DOCS_AGENT_MAX_TURNS, DOCS_CONTINUE_INSTRUCTION } from './continuation'
 import { createFilesSkill } from './files-skill'
-import {
-  composeDocsPanelSkills,
-  createHermesArtifactPatchSkill,
-} from './hermes-artifact-context'
+import { composeDocsPanelSkills, createHermesArtifactPatchSkill } from './hermes-artifact-context'
 import { createElectronTransport } from './transport'
 import { useI18n, t as tModule, aiLangDirective, type StringKey } from '../i18n/locale'
 import { Markdown } from '@genoffice/ui'

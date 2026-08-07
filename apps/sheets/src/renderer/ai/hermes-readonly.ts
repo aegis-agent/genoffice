@@ -47,11 +47,7 @@ export function isSheetsAgentConfigured(
   if (!settings) return false
   const config = settings.providers[settings.provider]
   if (!config?.model) return false
-  return (
-    settings.provider === 'hermes' ||
-    settings.provider === 'genspark' ||
-    !!config.apiKey
-  )
+  return settings.provider === 'hermes' || settings.provider === 'genspark' || !!config.apiKey
 }
 
 /**

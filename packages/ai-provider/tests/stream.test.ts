@@ -329,7 +329,15 @@ describe('streamForProvider: hermes session continuity', () => {
     const fetchMock = vi.fn().mockResolvedValue(okResponse(sseStream(['data: [DONE]'])))
     vi.stubGlobal('fetch', fetchMock)
     const { cb } = collector()
-    await streamForProvider('hermes', { apiKey: 'hk', model: 'hermes-agent' }, 'sys', [], [], 100, cb)
+    await streamForProvider(
+      'hermes',
+      { apiKey: 'hk', model: 'hermes-agent' },
+      'sys',
+      [],
+      [],
+      100,
+      cb,
+    )
     expect(fetchMock).toHaveBeenCalledWith(
       'http://127.0.0.1:8642/v1/chat/completions',
       expect.anything(),

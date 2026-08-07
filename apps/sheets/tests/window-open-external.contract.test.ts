@@ -27,7 +27,9 @@ describe('Sheets window-open external contract', () => {
       opened.push(u)
     })
 
-    expect(sheetsWindowOpenHandler('https://example.com/a', openExternal)).toEqual({ action: 'deny' })
+    expect(sheetsWindowOpenHandler('https://example.com/a', openExternal)).toEqual({
+      action: 'deny',
+    })
     expect(sheetsWindowOpenHandler('http://example.com', openExternal)).toEqual({ action: 'deny' })
     expect(sheetsWindowOpenHandler('javascript:alert(1)', openExternal)).toEqual({ action: 'deny' })
     expect(sheetsWindowOpenHandler('file:///etc/passwd', openExternal)).toEqual({ action: 'deny' })
@@ -49,7 +51,8 @@ describe('Sheets window-open external contract', () => {
     expect(src).not.toMatch(/setWindowOpenHandler\(\(\)\s*=>\s*\(\{\s*action:\s*'deny'\s*\}\)\)/)
 
     // Both window and view paths open allowlisted URLs externally, then deny.
-    const handlerBlocks = src.match(/setWindowOpenHandler\(\(\{\s*url\s*\}\)\s*=>\s*\{[\s\S]*?\}\)/g) ?? []
+    const handlerBlocks =
+      src.match(/setWindowOpenHandler\(\(\{\s*url\s*\}\)\s*=>\s*\{[\s\S]*?\}\)/g) ?? []
     expect(handlerBlocks.length).toBeGreaterThanOrEqual(2)
     for (const block of handlerBlocks) {
       expect(block).toMatch(/safeExternalUrl\(\s*url\s*\)/)

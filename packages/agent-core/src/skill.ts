@@ -62,9 +62,7 @@ export function composeSkills(id: string, intro: string, skills: AgentSkill[]): 
 }
 
 export type NativeHermesContextSource =
-  | (() => string)
-  | Pick<AgentSkill, 'buildContext'>
-  | { buildContext?: () => string }
+  (() => string) | Pick<AgentSkill, 'buildContext'> | { buildContext?: () => string }
 
 export interface NativeHermesReadOnlySkillOptions {
   id: string

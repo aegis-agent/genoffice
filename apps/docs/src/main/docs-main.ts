@@ -66,13 +66,7 @@ import {
   type GenSparkAccountStatus,
   type LegacyAiSettings,
 } from '@genoffice/ai-provider'
-import {
-  gskLogin,
-  gskLoginInfo,
-  hasGskAuth,
-  webSearch,
-  imageSearch,
-} from '@genoffice/ai-search'
+import { gskLogin, gskLoginInfo, hasGskAuth, webSearch, imageSearch } from '@genoffice/ai-search'
 import type {
   AttachmentAddResult,
   AttachmentImageResult,
@@ -2514,7 +2508,9 @@ export function registerAiIpc(): void {
   safeHandle(ipcMain, 'ai:chat', aiChatArgsSchema, async (_event, request) => {
     const { system, user } = request
     const stored = loadStoredAiSettings()
-    const { provider, config } = resolveMainOwnedAiConfig(stored, () => (process.env.API_SERVER_KEY ?? process.env.HERMES_API_SERVER_KEY ?? '').trim())
+    const { provider, config } = resolveMainOwnedAiConfig(stored, () =>
+      (process.env.API_SERVER_KEY ?? process.env.HERMES_API_SERVER_KEY ?? '').trim(),
+    )
     if (!config.apiKey) {
       return {
         ok: false,

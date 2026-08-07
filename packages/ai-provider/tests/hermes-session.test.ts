@@ -1,8 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import {
-  HERMES_SESSION_ID_MAX,
-  sanitizeHermesSessionId,
-} from '../src/hermes-session'
+import { HERMES_SESSION_ID_MAX, sanitizeHermesSessionId } from '../src/hermes-session'
 
 describe('sanitizeHermesSessionId', () => {
   it('accepts safe chat-like ids (hex, unsaved-*, path-ish tokens)', () => {

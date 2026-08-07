@@ -79,7 +79,9 @@ describe('ExternalDocxWatchRegistry (main-owned)', () => {
     // Public API is (webContentsId, absolutePath) only — main supplies both.
     expect(typeof h.registry.trackFromMain).toBe('function')
     expect(typeof h.registry.clear).toBe('function')
-    expect((h.registry as unknown as { trackFromRenderer?: unknown }).trackFromRenderer).toBeUndefined()
+    expect(
+      (h.registry as unknown as { trackFromRenderer?: unknown }).trackFromRenderer,
+    ).toBeUndefined()
     expect((h.registry as unknown as { trackFile?: unknown }).trackFile).toBeUndefined()
 
     h.signatures.set('/docs/a.docx', sig('A'))

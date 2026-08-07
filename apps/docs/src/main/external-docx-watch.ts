@@ -43,7 +43,8 @@ export class ExternalDocxWatchRegistry {
     this.sendExternalChange = deps.sendExternalChange
     this.debounceMs = deps.debounceMs ?? 400
     this.setTimeoutFn = deps.setTimeout ?? ((cb, ms) => setTimeout(cb, ms))
-    this.clearTimeoutFn = deps.clearTimeout ?? ((id) => clearTimeout(id as ReturnType<typeof setTimeout>))
+    this.clearTimeoutFn =
+      deps.clearTimeout ?? ((id) => clearTimeout(id as ReturnType<typeof setTimeout>))
   }
 
   /** Bind this WebContents to a document path owned by main. */

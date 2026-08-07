@@ -43,7 +43,9 @@ describe('Hermes Artifact Patch system prompt invariants', () => {
     expect(prompt).toMatch(/must not|never|forbid|do not/i)
     expect(prompt).toMatch(/initial edit request/i)
     expect(prompt).toMatch(/genoffice_\*/)
-    expect(prompt).toMatch(/currently open original|open document did not change|original unchanged/i)
+    expect(prompt).toMatch(
+      /currently open original|open document did not change|original unchanged/i,
+    )
     expect(prompt).not.toMatch(/\bgenoffice_edit\b|\bgenoffice_patch_docx\b/)
   })
 

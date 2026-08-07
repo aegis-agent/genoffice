@@ -36,20 +36,28 @@ describe('safeMarkdownHref', () => {
 describe('Markdown http(s) links', () => {
   it('renders [label](url) as anchors in paragraphs, headings, and lists', () => {
     const p = html('See [Example](https://example.com/path) please')
-    expect(p).toContain('<a href="https://example.com/path" target="_blank" rel="noopener noreferrer">Example</a>')
+    expect(p).toContain(
+      '<a href="https://example.com/path" target="_blank" rel="noopener noreferrer">Example</a>',
+    )
     expect(p).toContain('<p>')
 
     const h = html('## Read [Docs](http://docs.example)')
     expect(h).toContain('ai-md-h')
-    expect(h).toContain('<a href="http://docs.example" target="_blank" rel="noopener noreferrer">Docs</a>')
+    expect(h).toContain(
+      '<a href="http://docs.example" target="_blank" rel="noopener noreferrer">Docs</a>',
+    )
 
     const ul = html('- [Item](https://example.com/item)\n- plain')
     expect(ul).toContain('<ul>')
-    expect(ul).toContain('<a href="https://example.com/item" target="_blank" rel="noopener noreferrer">Item</a>')
+    expect(ul).toContain(
+      '<a href="https://example.com/item" target="_blank" rel="noopener noreferrer">Item</a>',
+    )
 
     const ol = html('1. [First](https://example.com/1)')
     expect(ol).toContain('<ol>')
-    expect(ol).toContain('<a href="https://example.com/1" target="_blank" rel="noopener noreferrer">First</a>')
+    expect(ol).toContain(
+      '<a href="https://example.com/1" target="_blank" rel="noopener noreferrer">First</a>',
+    )
   })
 
   it('keeps dangerous and relative markdown links as inert text (no anchor)', () => {
@@ -103,7 +111,9 @@ describe('Markdown http(s) links', () => {
 
   it('never uses dangerouslySetInnerHTML', () => {
     // Structural guarantee: renderer builds React elements only.
-    expect(html('[t](https://example.com)<script>alert(1)</script>')).not.toContain('dangerouslySetInnerHTML')
+    expect(html('[t](https://example.com)<script>alert(1)</script>')).not.toContain(
+      'dangerouslySetInnerHTML',
+    )
     expect(html('[t](https://example.com)<script>alert(1)</script>')).toContain('&lt;script&gt;')
   })
 })

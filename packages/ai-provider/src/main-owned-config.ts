@@ -1,4 +1,9 @@
-import { AI_PROVIDERS, HERMES_LLM_BASE_URL, defaultAiSettings, resolveAiSettings } from './providers'
+import {
+  AI_PROVIDERS,
+  HERMES_LLM_BASE_URL,
+  defaultAiSettings,
+  resolveAiSettings,
+} from './providers'
 import type { AiProviderConfig, AiProviderId, AiSettings, LegacyAiSettings } from './types'
 
 const HERMES_META = AI_PROVIDERS.find((p) => p.id === 'hermes')!
@@ -26,9 +31,7 @@ export function publicAiSettings(settings: AiSettings): AiSettings {
     providers[meta.id] = {
       apiKey: '',
       model:
-        meta.id === 'hermes'
-          ? allowlistedHermesModel(src.model)
-          : (src.model ?? meta.defaultModel),
+        meta.id === 'hermes' ? allowlistedHermesModel(src.model) : (src.model ?? meta.defaultModel),
       baseUrl:
         meta.id === 'hermes'
           ? (meta.defaultBaseUrl ?? HERMES_LLM_BASE_URL)

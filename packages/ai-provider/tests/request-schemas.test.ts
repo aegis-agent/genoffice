@@ -74,18 +74,12 @@ describe('aiStreamRequestSchema / aiChatRequestSchema', () => {
   })
 
   it('rejects unsafe sessionId values at the schema boundary', () => {
-    expect(() =>
-      aiStreamRequestSchema.parse({ ...validStream, sessionId: '' }),
-    ).toThrow()
-    expect(() =>
-      aiStreamRequestSchema.parse({ ...validStream, sessionId: 'bad\r\nid' }),
-    ).toThrow()
+    expect(() => aiStreamRequestSchema.parse({ ...validStream, sessionId: '' })).toThrow()
+    expect(() => aiStreamRequestSchema.parse({ ...validStream, sessionId: 'bad\r\nid' })).toThrow()
     expect(() =>
       aiStreamRequestSchema.parse({ ...validStream, sessionId: 'a'.repeat(129) }),
     ).toThrow()
-    expect(() =>
-      aiStreamRequestSchema.parse({ ...validStream, sessionId: 'has space' }),
-    ).toThrow()
+    expect(() => aiStreamRequestSchema.parse({ ...validStream, sessionId: 'has space' })).toThrow()
   })
 
   it('rejects settings / provider / apiKey / baseUrl on stream and chat', () => {

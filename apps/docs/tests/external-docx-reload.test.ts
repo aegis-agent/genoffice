@@ -7,7 +7,12 @@ import {
 describe('handleExternalDocxChange (renderer)', () => {
   it('E: clean document reloads without confirm', async () => {
     const apply = vi.fn()
-    const reload = vi.fn(async () => ({ path: '/a.docx', name: 'a.docx', data: new ArrayBuffer(1), hash: 'h' }))
+    const reload = vi.fn(async () => ({
+      path: '/a.docx',
+      name: 'a.docx',
+      data: new ArrayBuffer(1),
+      hash: 'h',
+    }))
     const confirm = vi.fn(() => true)
 
     const outcome = await handleExternalDocxChange({
@@ -26,7 +31,12 @@ describe('handleExternalDocxChange (renderer)', () => {
 
   it('E: dirty document confirms; decline keeps current content', async () => {
     const apply = vi.fn()
-    const reload = vi.fn(async () => ({ path: '/a.docx', name: 'a.docx', data: new ArrayBuffer(1), hash: 'h' }))
+    const reload = vi.fn(async () => ({
+      path: '/a.docx',
+      name: 'a.docx',
+      data: new ArrayBuffer(1),
+      hash: 'h',
+    }))
 
     const declined = await handleExternalDocxChange({
       isDirty: () => true,
@@ -54,12 +64,14 @@ describe('handleExternalDocxChange (renderer)', () => {
   it('E: stale async result is ignored when path changed mid-flight', async () => {
     const apply = vi.fn()
     let path = '/old.docx'
-    let resolveReload!: (v: {
-      path: string
-      name: string
-      data: ArrayBuffer
-      hash: string
-    } | null) => void
+    let resolveReload!: (
+      v: {
+        path: string
+        name: string
+        data: ArrayBuffer
+        hash: string
+      } | null,
+    ) => void
 
     const reload = vi.fn(
       () =>
