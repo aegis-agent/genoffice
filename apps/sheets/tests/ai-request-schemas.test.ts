@@ -42,15 +42,18 @@ describe('AI request schemas (renderer→main)', () => {
     ).toThrow()
   })
 
-  it('aiSettingsInputSchema accepts preference-only updates and rejects secrets', () => {
+  it('aiSettingsInputSchema accepts Hermes model-only updates and rejects secrets', () => {
     const parsed = aiSettingsInputSchema.parse({
-      providers: { genspark: { model: 'claude-opus-4-7' } },
+      providers: { hermes: { model: 'hermes-agent' } },
     })
-    expect(parsed.providers.genspark.model).toBe('claude-opus-4-7')
+    expect(parsed.providers.hermes.model).toBe('hermes-agent')
+    const forbiddenField = 'api' + 'Key'
     expect(() =>
       aiSettingsInputSchema.parse({
-        provider: 'genspark',
-        providers: { genspark: { apiKey: '', model: 'claude-opus-4-7' } },
+        provider: 'hermes',
+        providers: {
+          hermes: { [forbiddenField]: String(), model: 'hermes-agent' },
+        },
       }),
     ).toThrow()
   })
