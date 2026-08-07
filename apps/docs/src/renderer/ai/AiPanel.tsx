@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { Editor } from '@tiptap/core'
 import type { Block } from '@genoffice/docx-engine'
-import { AgentLoop, composeSkills, type AgentImage } from '@genoffice/agent-core'
+import { AgentLoop, type AgentImage } from '@genoffice/agent-core'
 import type { AiSettings, AttachmentAddResult, AttachmentMeta } from '../../shared/ipc'
 import { ATTACHMENT_IMAGE_EXTS } from '../../shared/ipc'
 import type { PmNode } from '../editor/convert'
@@ -10,6 +10,10 @@ import { createDocsSkill } from './docs-skill'
 import { applyRevisionsBy } from '../editor/revisions'
 import { DOCS_AGENT_MAX_TURNS, DOCS_CONTINUE_INSTRUCTION } from './continuation'
 import { createFilesSkill } from './files-skill'
+import {
+  createHermesArtifactPatchSkill,
+  createLiveDocsPanelSkill,
+} from './hermes-artifact-context'
 import { createElectronTransport } from './transport'
 import { useI18n, t as tModule, aiLangDirective, type StringKey } from '../i18n/locale'
 import { Markdown } from '@genoffice/ui'
@@ -206,6 +210,8 @@ export function AiPanel({
   attachmentsRef.current = attachments
   const trackChangesRef = useRef(trackChanges)
   trackChangesRef.current = trackChanges
+  const filePathRef = useRef(filePath)
+  filePathRef.current = filePath
 
   /** drop every aiChanged flag; silent = skip undo history (auto-accept path) */
   const clearAiHighlights = (silent = false) => {
@@ -343,14 +349,18 @@ export function AiPanel({
       // Stable per-document session id (project-store chatId).
       // Sent as X-Hermes-Session-Id → Hermes gateway keeps one session per document.
       sessionId: () => chatRefIds.current?.chatId,
-      skill: composeSkills('docs+files', '', [
-        createDocsSkill(
+      skill: createLiveDocsPanelSkill({
+        getProvider: () => settingsRef.current.provider,
+        docsSkill: createDocsSkill(
           () => editorRef.current,
           numIds,
           () => (trackChangesRef.current ? { author: AI_REVISION_AUTHOR } : undefined),
         ),
-        createFilesSkill(() => attachmentsRef.current),
-      ]),
+        filesSkill: createFilesSkill(() => attachmentsRef.current),
+        hermesSkill: createHermesArtifactPatchSkill({
+          getFilePath: () => filePathRef.current ?? null,
+        }),
+      }),
       captureSnapshot: () => editorRef.current.getJSON() as PmNode,
       events: {
         onText: (text) => patchLastAssistant({ text }),

@@ -37,8 +37,14 @@ export function composeSkills(id: string, intro: string, skills: AgentSkill[]): 
   }
   return {
     id,
-    systemPrompt: [intro, ...skills.map((s) => s.systemPrompt)].filter(Boolean).join('\n\n'),
-    tools: skills.flatMap((s) => s.tools),
+    // Live getters so conditional skills (e.g. Hermes-only context) can
+    // enable/disable systemPrompt without recomposing the AgentLoop skill.
+    get systemPrompt() {
+      return [intro, ...skills.map((s) => s.systemPrompt)].filter(Boolean).join('\n\n')
+    },
+    get tools() {
+      return skills.flatMap((s) => s.tools)
+    },
     buildContext: () =>
       skills
         .map((s) => s.buildContext?.() ?? '')
