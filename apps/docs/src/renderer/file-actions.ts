@@ -286,6 +286,7 @@ export async function newFile(ctx: FileActionContext): Promise<boolean | undefin
     ctx.dirtyRef.current = false
     ctx.setShowAi(true)
     ctx.setStatus(t('appNewDocCreated'))
+    void window.desktop.clearCurrentDocx()
     return true
   } catch (err) {
     ctx.setStatus(t('appNewFailed', { error: String(err) }))

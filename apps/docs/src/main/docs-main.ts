@@ -7,6 +7,7 @@ import {
   readFileSync,
   statSync,
   unlinkSync,
+  watch,
   writeFileSync,
 } from 'node:fs'
 import { basename, join } from 'node:path'
@@ -19,6 +20,7 @@ import {
   ipcMain,
   safeStorage,
   shell,
+  webContents,
 } from 'electron'
 import {
   AI_PROVIDER_SECRETS_VAULT_FILENAME,
@@ -82,6 +84,7 @@ import type {
 } from '../shared/ipc'
 import { ATTACHMENT_IMAGE_EXTS } from '../shared/ipc'
 import { findDocxPath } from '../shared/open-file'
+import { ExternalDocxWatchRegistry } from './external-docx-watch'
 import { initDocsAutoUpdater } from './updater'
 
 /**
@@ -1932,6 +1935,7 @@ export function openExternalDocx(filePath: string | null): void {
     if (win.isMinimized()) win.restore()
     win.show()
     win.focus()
+    trackOpenedDocx(win.webContents, result.path)
     win.webContents.send('docs:opened', result)
   })
 }
@@ -1997,6 +2001,9 @@ export function docsFileRenamed(wc: WebContents, oldPath: string, newPath: strin
   // keep the save allowlist in sync so docs:save accepts the renamed path
   docWritablePaths.delete(oldPath)
   docWritablePaths.add(newPath)
+  if (!wc.isDestroyed()) {
+    externalDocxWatch.trackFromMain(wc.id, newPath)
+  }
   wc.send('docs:renamed', { oldPath, newPath })
 }
 
@@ -2046,6 +2053,53 @@ function archiveOriginal(filePath: string, bytes: Buffer): string {
 
 /** paths the renderer may overwrite via docs:save — populated by open/save-as flows */
 const docWritablePaths = new Set<string>()
+
+/** Per-WebContents external DOCX watchers — paths only set by main after open/create/save-as. */
+const externalDocxWatch = new ExternalDocxWatchRegistry({
+  watchDir(dir, listener) {
+    const watcher = watch(dir, (_eventType, filename) => {
+      if (filename == null) {
+        listener(null)
+        return
+      }
+      listener(typeof filename === 'string' ? filename : String(filename))
+    })
+    return {
+      close: () => {
+        try {
+          watcher.close()
+        } catch {
+          /* ignore */
+        }
+      },
+    }
+  },
+  readSignature(filePath) {
+    try {
+      if (!existsSync(filePath)) return null
+      return createHash('sha256').update(readFileSync(filePath)).digest('hex')
+    } catch {
+      return null
+    }
+  },
+  sendExternalChange(webContentsId) {
+    try {
+      const wc = webContents.fromId(webContentsId)
+      if (wc && !wc.isDestroyed()) wc.send('docs:external-change')
+    } catch {
+      /* ignore */
+    }
+  },
+})
+
+function trackOpenedDocx(wc: WebContents, filePath: string): void {
+  if (wc.isDestroyed()) return
+  externalDocxWatch.trackFromMain(wc.id, filePath)
+}
+
+function noteAppDocxWrite(filePath: string, data: Buffer): void {
+  externalDocxWatch.noteAppWrite(filePath, createHash('sha256').update(data).digest('hex'))
+}
 
 // ── Crash recovery: dirty renderers push a copy every 30s
 // (docs:write-recovery); a normal save cleans it up; open offers Restore/Discard ──
@@ -2678,10 +2732,17 @@ export function registerDocsIpc(): void {
       properties: ['openFile'],
     })
     if (result.canceled || result.filePaths.length === 0) return null
-    return loadDocx(result.filePaths[0])
+    const opened = await loadDocx(result.filePaths[0])
+    if (opened) trackOpenedDocx(event.sender, opened.path)
+    return opened
   })
 
-  ipcMain.handle('docs:open-path', (_event, filePath: string) => loadDocx(filePath))
+  ipcMain.handle('docs:open-path', (event, filePath: string) =>
+    loadDocx(filePath).then((opened) => {
+      if (opened) trackOpenedDocx(event.sender, opened.path)
+      return opened
+    }),
+  )
 
   ipcMain.handle('docs:consume-pending-open', (event) => {
     rendererReady = true
@@ -2689,11 +2750,18 @@ export function registerDocsIpc(): void {
     const queued = pendingWindowOpens.get(event.sender.id)
     if (queued) {
       pendingWindowOpens.delete(event.sender.id)
-      return loadDocx(queued)
+      return loadDocx(queued).then((opened) => {
+        if (opened) trackOpenedDocx(event.sender, opened.path)
+        return opened
+      })
     }
     const filePath = pendingOpenPath
     pendingOpenPath = null
-    return filePath ? loadDocx(filePath) : null
+    if (!filePath) return null
+    return loadDocx(filePath).then((opened) => {
+      if (opened) trackOpenedDocx(event.sender, opened.path)
+      return opened
+    })
   })
 
   /** returns true when this tab was opened via "New Document" and should start blank */
@@ -2701,9 +2769,25 @@ export function registerDocsIpc(): void {
     rendererReady = true
     if (pendingNewBlankIds.has(event.sender.id)) {
       pendingNewBlankIds.delete(event.sender.id)
+      externalDocxWatch.clear(event.sender.id)
       return true
     }
     return false
+  })
+
+  /** Reload the path main is tracking for this sender — no renderer-supplied path. */
+  ipcMain.handle('docs:reload-current', (event) => {
+    const tracked = externalDocxWatch.getTrackedPath(event.sender.id)
+    if (!tracked) return null
+    return loadDocx(tracked).then((opened) => {
+      if (opened) trackOpenedDocx(event.sender, opened.path)
+      return opened
+    })
+  })
+
+  /** Drop watcher when the tab moves to a blank/untracked document. */
+  ipcMain.handle('docs:clear-current', (event) => {
+    externalDocxWatch.clear(event.sender.id)
   })
 
   ipcMain.handle('docs:save', (_event, filePath: string, data: ArrayBuffer) => {
@@ -2712,7 +2796,9 @@ export function registerDocsIpc(): void {
       if (typeof filePath !== 'string' || !docWritablePaths.has(filePath)) {
         return { ok: false, error: 'save target is not an opened document' }
       }
-      writeFileSync(filePath, Buffer.from(data))
+      const buf = Buffer.from(data)
+      writeFileSync(filePath, buf)
+      noteAppDocxWrite(filePath, buf)
       clearRecoveryCopy(filePath)
       pushRecent(filePath)
       return { ok: true }
@@ -2741,8 +2827,11 @@ export function registerDocsIpc(): void {
     })
     if (result.canceled || !result.filePath) return { ok: false }
     try {
-      writeFileSync(result.filePath, Buffer.from(data))
+      const buf = Buffer.from(data)
+      writeFileSync(result.filePath, buf)
       docWritablePaths.add(result.filePath)
+      noteAppDocxWrite(result.filePath, buf)
+      trackOpenedDocx(event.sender, result.filePath)
       pushRecent(result.filePath)
       notifyFileSaved(event.sender, result.filePath)
       return { ok: true, path: result.filePath }
@@ -2754,8 +2843,11 @@ export function registerDocsIpc(): void {
   ipcMain.handle('docs:save-new', (event, defaultName: string, data: ArrayBuffer) => {
     try {
       const filePath = uniquePathIn(defaultSaveDir(), defaultName)
-      writeFileSync(filePath, Buffer.from(data))
+      const buf = Buffer.from(data)
+      writeFileSync(filePath, buf)
       docWritablePaths.add(filePath)
+      noteAppDocxWrite(filePath, buf)
+      trackOpenedDocx(event.sender, filePath)
       pushRecent(filePath)
       notifyFileSaved(event.sender, filePath)
       return { ok: true, path: filePath }
@@ -3302,6 +3394,7 @@ export function createDocsWindow(openPath?: string): BrowserWindow {
   })
   win.on('closed', () => {
     pendingWindowOpens.delete(webContentsId)
+    externalDocxWatch.clear(webContentsId)
     // release any close-guard waiter still keyed on the gone webContents
     closeCheckWaiters.get(webContentsId)?.({ dirty: false, autoSave: false })
     closeCheckWaiters.delete(webContentsId)
@@ -3475,6 +3568,7 @@ export function createDocsView(openPath?: string): WebContentsView {
   const wcId = view.webContents.id
   view.webContents.once('destroyed', () => {
     pendingWindowOpens.delete(wcId)
+    externalDocxWatch.clear(wcId)
     closeCheckWaiters.get(wcId)?.({ dirty: false, autoSave: false })
     closeCheckWaiters.delete(wcId)
     closeSaveWaiters.get(wcId)?.(false)

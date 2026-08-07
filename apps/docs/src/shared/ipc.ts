@@ -152,6 +152,15 @@ export interface DesktopApi {
   onOpenDocx(handler: (result: OpenFileResult) => void): () => void
   /** File was renamed externally (renamed in the shell Home list) — pushes old and new paths; renderer syncs its save path and title bar */
   onRenamedDocx(handler: (paths: { oldPath: string; newPath: string }) => void): () => void
+  /**
+   * Main detected an external modification of the document currently tracked for this tab.
+   * Payload is intentionally empty — reload goes through reloadCurrentDocx (main-owned path).
+   */
+  onDocxExternalChange(handler: () => void): () => void
+  /** Reload the document main is tracking for this WebContents (no renderer-supplied path). */
+  reloadCurrentDocx(): Promise<OpenFileResult | null>
+  /** Release main's tracked document for this tab (e.g. switched to a new blank doc). */
+  clearCurrentDocx(): Promise<void>
   saveDocx(path: string, data: ArrayBuffer): Promise<{ ok: boolean; error?: string }>
   /** crash-recovery copy of a dirty document, stored under userData */
   writeRecoveryCopy(path: string, data: ArrayBuffer): Promise<{ ok: boolean }>

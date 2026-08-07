@@ -40,6 +40,13 @@ const api: DesktopApi = {
     ipcRenderer.on('docs:renamed', listener)
     return () => ipcRenderer.removeListener('docs:renamed', listener)
   },
+  onDocxExternalChange: (handler) => {
+    const listener = () => handler()
+    ipcRenderer.on('docs:external-change', listener)
+    return () => ipcRenderer.removeListener('docs:external-change', listener)
+  },
+  reloadCurrentDocx: () => ipcRenderer.invoke('docs:reload-current'),
+  clearCurrentDocx: () => ipcRenderer.invoke('docs:clear-current'),
   saveDocx: (path: string, data: ArrayBuffer) => ipcRenderer.invoke('docs:save', path, data),
   writeRecoveryCopy: (path: string, data: ArrayBuffer) =>
     ipcRenderer.invoke('docs:write-recovery', path, data),
