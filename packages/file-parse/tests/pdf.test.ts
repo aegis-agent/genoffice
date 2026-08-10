@@ -6,6 +6,11 @@ describe('parseFileToText: pdf', () => {
   it('extracts page text via pdfjs', async () => {
     const path = writeFixture('doc.pdf', buildPdfFixture('Hello PDF parsing'))
     const result = await parseFileToText(path)
+    // PDF.js 6 removed PDFDocumentProxy.destroy(); teardown must use loadingTask.destroy()
+    // or this path fails with "doc.destroy is not a function" after a successful extract.
+    if (!result.ok) {
+      expect(result.error).not.toMatch(/destroy is not a function/)
+    }
     expect(result.ok).toBe(true)
     expect(result.kind).toBe('text')
     expect(result.text).toContain('Hello PDF parsing')

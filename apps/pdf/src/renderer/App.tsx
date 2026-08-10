@@ -715,7 +715,7 @@ export default function App() {
       (o) => setOutline(o && o.length > 0 ? (o as OutlineNode[]) : null),
       () => setOutline(null),
     )
-    if (previous) void previous.destroy()
+    if (previous) void previous.loadingTask.destroy()
   }, [])
 
   const openPath = useCallback(
@@ -1341,7 +1341,7 @@ export default function App() {
         try {
           await printPdf(pdoc)
         } finally {
-          void pdoc.destroy()
+          void pdoc.loadingTask.destroy()
         }
       } catch (err) {
         opFailed(err instanceof Error ? err.message : String(err))
