@@ -1,7 +1,8 @@
 /**
  * Source-level wiring contracts for Docs/Slides/Sheets AI IPC trust boundary (P0 C2).
  * Malicious renderer settings must not select provider/baseUrl/key for AI calls;
- * get-settings redacts keys; set-settings sanitizes; runtime config is main-owned Genspark+gsk.
+ * get-settings redacts keys; set-settings sanitizes; runtime config is main-owned
+ * Hermes (env API_SERVER_KEY / HERMES_API_SERVER_KEY) via resolveMainOwnedAiConfig.
  */
 import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
@@ -29,7 +30,9 @@ describe('AI main-owned config wiring', () => {
       expect(src).toMatch(/sanitizeRendererAiSettingsUpdate/)
       // Stream/chat handlers must not read authority from the renderer payload.
       expect(src).not.toMatch(/request\.settings/)
-      expect(src).toMatch(/gskApiKey/)
+      // Main-owned Hermes gateway key (never renderer-supplied).
+      expect(src).toMatch(/API_SERVER_KEY/)
+      expect(src).toMatch(/HERMES_API_SERVER_KEY/)
     })
   }
 

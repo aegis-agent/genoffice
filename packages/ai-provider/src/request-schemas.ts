@@ -4,6 +4,7 @@
  * is never accepted on request or preference-update shapes.
  */
 import { z } from 'zod'
+import { HERMES_SESSION_ID_MAX, sanitizeHermesSessionId } from './hermes-session'
 import type { AiChatRequest, AiStreamRequest } from './types'
 
 // ── DoS-oriented bounds (keep legitimate tool/image payloads working) ─────
@@ -105,6 +106,21 @@ const agentToolDefSchema = z
   })
   .strict()
 
+/**
+ * Optional session id on stream requests. Empty / overlong / CR-LF / unsafe
+ * values are rejected at the schema boundary (not silently accepted for later
+ * Fetch to mishandle). Callers may also pre-sanitize with sanitizeHermesSessionId.
+ */
+const sessionIdSchema = z
+  .string()
+  .min(1)
+  .max(HERMES_SESSION_ID_MAX)
+  .superRefine((val, ctx) => {
+    if (sanitizeHermesSessionId(val) === undefined) {
+      ctx.addIssue({ code: 'custom', message: 'unsafe hermes session id' })
+    }
+  })
+
 /** One-shot chat request (no settings / provider authority). */
 export const aiChatRequestSchema = z
   .object({
@@ -121,6 +137,7 @@ export const aiStreamRequestSchema = z
     messages: z.array(agentMessageSchema).max(AI_MESSAGES_MAX),
     tools: z.array(agentToolDefSchema).max(AI_TOOLS_MAX).optional(),
     maxTokens: z.number().int().min(AI_MAX_TOKENS_MIN).max(AI_MAX_TOKENS_MAX).optional(),
+    sessionId: sessionIdSchema.optional(),
   })
   .strict()
 
@@ -132,7 +149,7 @@ export const aiSettingsPreferencesUpdateSchema = z
   .object({
     providers: z
       .object({
-        genspark: z
+        hermes: z
           .object({
             model: z.string().min(1).max(AI_MODEL_NAME_MAX),
           })
@@ -159,6 +176,7 @@ export function asAiStreamRequest(parsed: AiStreamRequestParsed): AiStreamReques
   }
   if (parsed.tools !== undefined) out.tools = parsed.tools
   if (parsed.maxTokens !== undefined) out.maxTokens = parsed.maxTokens
+  if (parsed.sessionId !== undefined) out.sessionId = parsed.sessionId
   return out
 }
 

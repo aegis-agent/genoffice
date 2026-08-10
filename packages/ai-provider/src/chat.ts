@@ -1,5 +1,5 @@
 import { httpBodyDetail } from './http-error'
-import { GENSPARK_LLM_BASE_URLS } from './providers'
+import { GENSPARK_LLM_BASE_URLS, HERMES_LLM_BASE_URL } from './providers'
 import type {
   AiChatResponse,
   AiProviderConfig,
@@ -120,6 +120,8 @@ export async function chatForProvider(
   network?: ProviderNetworkOptions,
 ): Promise<AiChatResponse> {
   switch (provider) {
+    case 'hermes':
+      return chatOpenAiCompatible(config.baseUrl || HERMES_LLM_BASE_URL, config, system, user)
     case 'genspark':
       if (config.model.startsWith('claude')) {
         return chatAnthropic(config, system, user, GENSPARK_LLM_BASE_URLS.anthropic)

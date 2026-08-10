@@ -65,6 +65,8 @@ export interface AgentLoopOptions<TSnapshot = unknown> {
   formatUserMessage?(instruction: string, context: string): string
   /** appended to the system prompt each turn (e.g. reply-language directive following the UI language) */
   systemSuffix?(): string
+  /** stable conversation id → forwarded as X-Hermes-Session-Id for gateway session continuity */
+  sessionId?: string | (() => string | undefined)
 }
 
 const COMPACT_MAX_BYTES = 256 * 1024
@@ -436,6 +438,11 @@ export class AgentLoop<TSnapshot = unknown> {
     this.trimHistory()
     this.turnText = ''
     this.toolCalls = []
+    // exactOptionalPropertyTypes: build the optional sessionId outside the literal
+    const sessionId =
+      typeof this.options.sessionId === 'function'
+        ? (this.options.sessionId as () => string | undefined)()
+        : this.options.sessionId
     // Some transports emit an extra onDone after cancel — this turn may finalize only once
     let settled = false
     this.handle = this.options.transport.stream(
@@ -443,6 +450,7 @@ export class AgentLoop<TSnapshot = unknown> {
         system: this.options.skill.systemPrompt + (this.options.systemSuffix?.() ?? ''),
         messages: [...this.history],
         tools: this.finalizing ? [] : this.options.skill.tools,
+        ...(sessionId ? { sessionId } : {}),
       },
       {
         onDelta: (text) => {

@@ -1,6 +1,7 @@
 import type { AgentMessage, AgentToolCall, AgentToolDef } from '@genoffice/agent-core'
 import { httpBodyDetail } from './http-error'
-import { GENSPARK_LLM_BASE_URLS } from './providers'
+import { HERMES_SESSION_ID_HEADER, sanitizeHermesSessionId } from './hermes-session'
+import { GENSPARK_LLM_BASE_URLS, HERMES_LLM_BASE_URL } from './providers'
 import type {
   AiProviderConfig,
   AiProviderId,
@@ -362,13 +363,18 @@ export async function streamOpenAiCompatible(
   maxTokens: number,
   cb: StreamCallbacks,
   fetchImpl: CustomProviderFetch = fetch,
+  /** Only set for Hermes: validated session id → X-Hermes-Session-Id header */
+  sessionId?: string,
 ): Promise<void> {
+  const safeSessionId = sanitizeHermesSessionId(sessionId)
   const response = await fetchImpl(`${baseUrl.replace(/\/$/, '')}/chat/completions`, {
     method: 'POST',
     signal: cb.signal,
     headers: {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${config.apiKey}`,
+      // Hermes gateway session continuity — omit when unset/unsafe
+      ...(safeSessionId ? { [HERMES_SESSION_ID_HEADER]: safeSessionId } : {}),
     },
     body: JSON.stringify({
       model: config.model,
@@ -452,8 +458,29 @@ export async function streamForProvider(
   maxTokens: number,
   cb: StreamCallbacks,
   network?: ProviderNetworkOptions,
+  /**
+   * Stable per-document id. Only hermes requests may send X-Hermes-Session-Id;
+   * value is validated before the header is set.
+   */
+  sessionId?: string,
 ): Promise<void> {
   switch (provider) {
+    case 'hermes':
+      // Native Hermes: local gateway (OpenAI-compatible) runs the full agent.
+      // Session header is Hermes-only — never attached to other providers.
+      // Defense in depth: never forward client tool schemas (or tool_choice).
+      // Hermes agent discovers its own tools; renderer mutation tools must not bridge.
+      return streamOpenAiCompatible(
+        config.baseUrl || HERMES_LLM_BASE_URL,
+        config,
+        system,
+        messages,
+        [],
+        maxTokens,
+        cb,
+        fetch,
+        sessionId,
+      )
     case 'genspark':
       // The proxy exposes three protocol-specific endpoints; route by model id prefix: claude uses
       // the Anthropic protocol (preserves image input fidelity), gemini uses Gemini, rest OpenAI-compatible

@@ -71,4 +71,24 @@ describe('createIpcTransport', () => {
     handle.cancel()
     expect(cancelled).toEqual([started[0]!.requestId])
   })
+
+  it('forwards sessionId on start when present on the agent stream request', () => {
+    const started: IpcStreamStart[] = []
+    const transport = createIpcTransport({
+      onStream: () => () => undefined,
+      start: (request) => started.push(request),
+      cancel: () => undefined,
+      unknownErrorText: () => 'unknown error',
+    })
+    transport.stream(
+      { system: 'sys', messages: [], tools: [], sessionId: 'doc-chat-42' },
+      { onDelta: vi.fn(), onToolCall: vi.fn(), onDone: vi.fn(), onError: vi.fn() },
+    )
+    expect(started[0]).toMatchObject({ sessionId: 'doc-chat-42', system: 'sys' })
+  })
+
+  it('omits sessionId on start when the agent stream request has none', () => {
+    const { started } = setup()
+    expect(started[0]).not.toHaveProperty('sessionId')
+  })
 })

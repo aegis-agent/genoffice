@@ -11,8 +11,16 @@ export type {
   ToolDisplay,
   ToolExecution,
 } from './types'
-export { composeSkills } from './skill'
-export type { AgentSkill } from './skill'
+export {
+  composeSkills,
+  createNativeHermesReadOnlySkill,
+  resolveNativeHermesAgentMode,
+} from './skill'
+export type {
+  AgentSkill,
+  NativeHermesContextSource,
+  NativeHermesReadOnlySkillOptions,
+} from './skill'
 export { AgentLoop } from './loop'
 export type {
   AgentLoopEvents,

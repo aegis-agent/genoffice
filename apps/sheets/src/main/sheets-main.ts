@@ -69,14 +69,7 @@ import {
   type LegacyAiSettings,
 } from '@genoffice/ai-provider'
 import { csvToXlsxBuffer, decodeCsvBuffer } from '../gateway/csv-import'
-import {
-  gskApiKey,
-  gskLogin,
-  gskLoginInfo,
-  hasGskAuth,
-  webSearch,
-  imageSearch,
-} from '@genoffice/ai-search'
+import { gskLogin, gskLoginInfo, hasGskAuth, webSearch, imageSearch } from '@genoffice/ai-search'
 import { parseFileToText } from '@genoffice/file-parse'
 import type { CellEdit, SheetStructuralOps } from '../gateway/xlsx-gateway'
 import { readArchiveEntryText, saveWorkbookViaSidecar } from '../gateway/xlsx-package-io'
@@ -1327,7 +1320,13 @@ export async function createSheetsWindow(
   if (options.includeAiHandlers ?? true) registerSheetsAiIpc()
   if (options.includeAiHandlers ?? true) registerProjectIpc()
   registerSheetsSession(window.webContents, client)
-  window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
+  // AI chat markdown links use target=_blank → window.open; route allowlisted
+  // http(s) to the OS browser and never spawn an in-app window with remote content.
+  window.webContents.setWindowOpenHandler(({ url }) => {
+    const target = safeExternalUrl(url)
+    if (target) void shell.openExternal(target)
+    return { action: 'deny' }
+  })
   window.webContents.on('will-navigate', (event) => event.preventDefault())
   if (!app.isPackaged) {
     window.webContents.on('console-message', (details) => {
@@ -1373,7 +1372,11 @@ export function createSheetsView(options: { includeAiHandlers?: boolean } = {}):
   registerSheetsIpc()
   if (options.includeAiHandlers ?? true) registerSheetsAiIpc()
   registerSheetsSession(view.webContents, client)
-  view.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
+  view.webContents.setWindowOpenHandler(({ url }) => {
+    const target = safeExternalUrl(url)
+    if (target) void shell.openExternal(target)
+    return { action: 'deny' }
+  })
   view.webContents.on('will-navigate', (event) => event.preventDefault())
   if (!app.isPackaged) {
     view.webContents.on('console-message', (details) => {
@@ -2098,11 +2101,13 @@ export function registerSheetsAiIpc(): void {
   safeHandle(ipcMain, IPC_CHANNELS.aiChat, aiChatArgsSchema, async (event, request) => {
     sessionFor(event as IpcMainInvokeEvent)
     const stored = loadStoredAiSettings()
-    const { provider, config } = resolveMainOwnedAiConfig(stored, gskApiKey)
+    const { provider, config } = resolveMainOwnedAiConfig(stored, () =>
+      (process.env.API_SERVER_KEY ?? process.env.HERMES_API_SERVER_KEY ?? '').trim(),
+    )
     if (!config.apiKey) {
       return {
         ok: false,
-        error: tm('errGskNotLoggedIn'),
+        error: tm('errNoApiKey', { provider }),
       }
     }
     if (!config.model) return { ok: false, error: tm('errNoModel') }
@@ -2120,7 +2125,9 @@ export function registerSheetsAiIpc(): void {
     const tools = request.tools ?? []
     const maxTokens = request.maxTokens ?? 8192
     const stored = loadStoredAiSettings()
-    const { provider, config } = resolveMainOwnedAiConfig(stored, gskApiKey)
+    const { provider, config } = resolveMainOwnedAiConfig(stored, () =>
+      (process.env.API_SERVER_KEY ?? process.env.HERMES_API_SERVER_KEY ?? '').trim(),
+    )
     const send = (chunk: AiStreamChunk) => {
       if (!inv.sender.isDestroyed()) inv.sender.send(IPC_CHANNELS.aiStreamChunk, chunk)
     }
@@ -2128,7 +2135,7 @@ export function registerSheetsAiIpc(): void {
       send({
         requestId,
         type: 'error',
-        error: tm('errGskNotLoggedIn'),
+        error: tm('errNoApiKey', { provider }),
       })
       return
     }
@@ -2139,11 +2146,21 @@ export function registerSheetsAiIpc(): void {
     const controller = new AbortController()
     entry.aiStreams.set(requestId, controller)
     try {
-      await streamForProvider(provider, config, system, messages, tools, maxTokens, {
-        signal: controller.signal,
-        onDelta: (text) => send({ requestId, type: 'delta', text }),
-        onToolCall: (toolCall) => send({ requestId, type: 'tool-call', toolCall }),
-      })
+      await streamForProvider(
+        provider,
+        config,
+        system,
+        messages,
+        tools,
+        maxTokens,
+        {
+          signal: controller.signal,
+          onDelta: (text) => send({ requestId, type: 'delta', text }),
+          onToolCall: (toolCall) => send({ requestId, type: 'tool-call', toolCall }),
+        },
+        undefined,
+        request.sessionId,
+      )
       send({ requestId, type: 'done' })
     } catch (err) {
       if (controller.signal.aborted) {

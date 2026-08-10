@@ -119,6 +119,7 @@ import {
   writeRecoveryCopy as writeRecoveryCopyImpl,
   type FileActionContext,
 } from './file-actions'
+import { handleExternalDocxChange } from './external-docx-reload'
 import {
   allocateListNumId as allocateListNumIdImpl,
   continueNumbering as continueNumberingImpl,
@@ -798,6 +799,25 @@ export function App() {
         )
       }),
     [],
+  )
+
+  // External process (e.g. Artifact Patch MCP) modified the on-disk DOCX.
+  // Main owns the path; signal carries no path. Dirty docs require confirm.
+  useEffect(
+    () =>
+      window.desktop.onDocxExternalChange(() => {
+        void handleExternalDocxChange({
+          isDirty: () => anyDirtyRef.current || dirtyRef.current,
+          getPath: () => fileCtxRef.current.doc?.filePath ?? null,
+          confirm: () =>
+            window.confirm(
+              'This file was changed by another program. Reload and lose your unsaved changes?',
+            ),
+          reload: () => window.desktop.reloadCurrentDocx(),
+          apply: (result) => loadFile(result),
+        })
+      }),
+    [loadFile],
   )
 
   useEffect(() => {

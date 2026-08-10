@@ -28,6 +28,8 @@ export interface IpcStreamStart {
   system: string
   messages: AgentMessage[]
   tools: AgentToolDef[]
+  /** stable conversation id → forwarded as X-Hermes-Session-Id for gateway session continuity */
+  sessionId?: string
 }
 
 export interface IpcTransportOptions {
@@ -70,6 +72,7 @@ export function createIpcTransport(options: IpcTransportOptions): AgentTransport
         system: request.system,
         messages: request.messages,
         tools: request.tools,
+        ...(request.sessionId ? { sessionId: request.sessionId } : {}),
       })
       return { cancel: () => options.cancel(requestId) }
     },
